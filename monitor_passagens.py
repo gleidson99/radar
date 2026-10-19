@@ -164,12 +164,14 @@ def buscar(origem, destino, ida, volta):
     opcoes = []
     for voo in resultado.flights:
         preco = para_numero(voo.price)
-        if preco is None:
+        if not preco or preco <= 0:  # ignora linhas sem preço válido (ex.: "0")
             continue
         if MAX_ESCALAS is not None and isinstance(voo.stops, int) and voo.stops > MAX_ESCALAS:
             continue
         opcoes.append((preco, voo))
     if not opcoes:
+        amostra = [(v.price, v.name, v.stops, v.duration) for v in resultado.flights[:3]]
+        print(f"  ! {origem}->{destino} {ida}: sem preço válido ({len(resultado.flights)} voos). Amostra: {amostra}")
         return None
 
     preco, voo = min(opcoes, key=lambda x: x[0])
@@ -369,7 +371,7 @@ def main():
     anteriores = [
         e["melhor"]["preco"]
         for e in historico["execucoes"]
-        if e["melhor"].get("moeda") == melhor["moeda"]
+        if e["melhor"].get("moeda") == melhor["moeda"] and e["melhor"].get("preco", 0) > 0
     ]
     ultimo = anteriores[-1] if anteriores else None
     minimo = min(anteriores) if anteriores else None
