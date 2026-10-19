@@ -24,8 +24,8 @@ DESTINOS = ["IST", "SAW"]            # Istambul (aeroporto principal e Sabiha G�
 PRIMEIRA_IDA = date(2027, 1, 8)
 ULTIMA_IDA = date(2027, 1, 15)
 DIAS_NA_VIAGEM = 15                  # volta = ida + 15 dias
-ADULTOS = 2                          # AJUSTE para o número real de passageiros
-CRIANCAS = 0
+ADULTOS = 2
+CRIANCAS = 1                         # criança de 6 anos (faixa de 2 a 11 anos)
 MAX_ESCALAS = 2                      # None = sem filtro
 LIMITE_ALERTA = None                 # em R$, ex.: 15000 -> avisa sempre que ficar abaixo disso
 QUEDA_MINIMA_PCT = 5                 # avisa se cair 5% ou mais vs. última execução
