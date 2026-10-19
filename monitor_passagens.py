@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Monitor de passagens CNF/GRU -> Turquia (ida e volta, 15 dias).
 
-Consulta o Google Flights (via biblioteca não oficial fast-flights), guarda o
-histórico em historico.json e avisa pelo Telegram quando o preço cai.
+Consulta o Google Flights (via biblioteca não oficial fast-flights), converte os
+preços para reais, guarda o histórico em historico.json e avisa pelo Telegram
+quando o preço cai.
 """
+import html
 import json
 import os
 import re
@@ -25,13 +27,23 @@ DIAS_NA_VIAGEM = 15                  # volta = ida + 15 dias
 ADULTOS = 2                          # AJUSTE para o número real de passageiros
 CRIANCAS = 0
 MAX_ESCALAS = 2                      # None = sem filtro
-LIMITE_ALERTA = None                 # ex.: 4500 -> avisa sempre que ficar abaixo disso
+LIMITE_ALERTA = None                 # em R$, ex.: 15000 -> avisa sempre que ficar abaixo disso
 QUEDA_MINIMA_PCT = 5                 # avisa se cair 5% ou mais vs. última execução
 PAUSA_ENTRE_BUSCAS = 3               # segundos, para não sobrecarregar o Google
 HISTORICO = Path(__file__).with_name("historico.json")
+
+AEROPORTOS = {
+    "CNF": "Confins",
+    "GRU": "Guarulhos",
+    "IST": "Istambul",
+    "SAW": "Istambul (Sabiha Gökçen)",
+}
+SIMBOLOS = {"BRL": "R$", "USD": "US$", "EUR": "€"}
+MEDALHAS = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
 # -----------------------------------------------------------------------
 
 
+# ------------------------------ PREÇOS ---------------------------------
 def para_numero(texto):
     """Converte 'R$ 4.500' ou '$1,234' em inteiro (ignora centavos)."""
     if not texto:
@@ -41,6 +53,80 @@ def para_numero(texto):
     return int(digitos) if digitos else None
 
 
+def detectar_moeda(texto):
+    t = (texto or "").upper()
+    if "R$" in t or "BRL" in t:
+        return "BRL"
+    if "€" in t or "EUR" in t:
+        return "EUR"
+    return "USD"  # "$" ou "US$"
+
+
+def _json_da_url(url):
+    req = urllib.request.Request(url, headers={"User-Agent": "radar-passagens/1.0"})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+_COTACOES = {}
+
+
+def cotacao_para_brl(moeda):
+    """Quanto vale 1 unidade da moeda em reais (None se não conseguir)."""
+    if moeda == "BRL":
+        return 1.0
+    if moeda in _COTACOES:
+        return _COTACOES[moeda]
+    taxa = None
+    try:
+        dados = _json_da_url(f"https://economia.awesomeapi.com.br/json/last/{moeda}-BRL")
+        taxa = float(dados[f"{moeda}BRL"]["bid"])
+    except Exception as erro:
+        print(f"  ! cotação (AwesomeAPI) falhou: {erro}")
+    if taxa is None:
+        try:
+            dados = _json_da_url(f"https://open.er-api.com/v6/latest/{moeda}")
+            taxa = float(dados["rates"]["BRL"])
+        except Exception as erro:
+            print(f"  ! cotação (open.er-api) falhou: {erro}")
+    _COTACOES[moeda] = taxa
+    return taxa
+
+
+def fmt_preco(valor, moeda="BRL"):
+    texto = f"{valor:,.0f}".replace(",", ".")
+    return f"{SIMBOLOS.get(moeda, moeda)} {texto}"
+
+
+def fmt_data(iso):
+    return datetime.strptime(iso, "%Y-%m-%d").strftime("%d/%m")
+
+
+def fmt_duracao(texto):
+    if not texto:
+        return "—"
+    m = re.search(r"(\d+)\s*hr(?:\s*(\d+)\s*min)?", texto)
+    if m:
+        return f"{m.group(1)}h{int(m.group(2) or 0):02d}"
+    m = re.search(r"(\d+)\s*min", texto)
+    return f"{m.group(1)}min" if m else texto
+
+
+def fmt_escalas(n, curto=False):
+    if not isinstance(n, int):
+        return "—"
+    if n == 0:
+        return "direto"
+    if curto:
+        return f"{n} esc."
+    return "1 escala" if n == 1 else f"{n} escalas"
+
+
+def nome_aeroporto(codigo):
+    return AEROPORTOS.get(codigo, codigo)
+
+
+# ------------------------------- BUSCA ---------------------------------
 def link_busca(origem, destino, ida, volta):
     q = f"Flights from {origem} to {destino} on {ida} through {volta}"
     return "https://www.google.com/travel/flights?q=" + urllib.parse.quote(q)
@@ -88,6 +174,7 @@ def buscar(origem, destino, ida, volta):
         "ida": ida.isoformat(),
         "volta": volta.isoformat(),
         "preco": preco,
+        "moeda": detectar_moeda(voo.price),
         "preco_texto": voo.price,
         "companhia": voo.name,
         "escalas": voo.stops,
@@ -96,15 +183,94 @@ def buscar(origem, destino, ida, volta):
     }
 
 
-def enviar_telegram(mensagem):
+def converter_para_reais(resultados):
+    """Converte os preços para R$ (mantém o valor original em preco_original)."""
+    for r in resultados:
+        taxa = cotacao_para_brl(r["moeda"])
+        r["preco_original"] = r["preco"]
+        r["moeda_original"] = r["moeda"]
+        if taxa:
+            r["preco"] = round(r["preco"] * taxa)
+            r["moeda"] = "BRL"
+            r["cotacao"] = None if r["moeda_original"] == "BRL" else round(taxa, 4)
+        else:
+            r["cotacao"] = None  # sem cotação: mantém na moeda original
+
+
+# ------------------------------ TELEGRAM -------------------------------
+def montar_mensagem(resultados, motivos, ultimo, minimo):
+    melhor = resultados[0]
+    moeda = melhor["moeda"]
+    e = html.escape
+
+    linhas = ["✈️ <b>Radar de passagens · Turquia</b>", ""]
+    linhas.append("🔔 <i>" + e(" · ".join(motivos)) + "</i>")
+    linhas += [
+        "",
+        f"🏆 <b>{fmt_preco(melhor['preco'], moeda)}</b>",
+        f"📍 {e(nome_aeroporto(melhor['origem']))} → {e(nome_aeroporto(melhor['destino']))}",
+        f"📅 {fmt_data(melhor['ida'])} → {fmt_data(melhor['volta'])} · {DIAS_NA_VIAGEM} dias",
+        f"🛫 {e(melhor['companhia'] or '—')}",
+        f"⏱ {fmt_escalas(melhor['escalas'])} · {fmt_duracao(melhor['duracao'])}",
+    ]
+
+    tendencia = []
+    if ultimo:
+        var = (melhor["preco"] - ultimo) / ultimo * 100
+        if abs(var) < 0.5:
+            tendencia.append(f"➖ Igual à última consulta ({fmt_preco(ultimo, moeda)})")
+        else:
+            seta = "📉" if var < 0 else "📈"
+            sinal = "−" if var < 0 else "+"
+            tendencia.append(
+                f"{seta} {sinal}{abs(var):.0f}% vs. última consulta ({fmt_preco(ultimo, moeda)})"
+            )
+    if minimo:
+        tendencia.append(f"🏷 Menor preço já visto: {fmt_preco(min(minimo, melhor['preco']), moeda)}")
+    if tendencia:
+        linhas += [""] + tendencia
+
+    if len(resultados) > 1:
+        linhas += ["", "<b>Outras boas opções</b>"]
+        for i, r in enumerate(resultados[1:5], 1):
+            linhas.append(
+                f"{MEDALHAS[i]} <b>{fmt_preco(r['preco'], r['moeda'])}</b> · "
+                f"{r['origem']}→{r['destino']} · {fmt_data(r['ida'])}–{fmt_data(r['volta'])} · "
+                f"{fmt_escalas(r['escalas'], curto=True)} · {fmt_duracao(r['duracao'])}"
+            )
+
+    linhas.append("")
+    if melhor.get("cotacao"):
+        simbolo = SIMBOLOS.get(melhor["moeda_original"], melhor["moeda_original"])
+        taxa = f"{melhor['cotacao']:.2f}".replace(".", ",")
+        linhas.append(f"💱 Convertido de {simbolo} a R$ {taxa} (valor aproximado)")
+    linhas.append("<i>Valores ida e volta, como exibidos no Google Flights. Reconfirme antes de comprar.</i>")
+    return "\n".join(linhas)
+
+
+def montar_botoes(resultados):
+    botoes = []
+    for i, r in enumerate(resultados[:3]):
+        rotulo = f"{MEDALHAS[i]} {r['origem']}→{r['destino']} · {fmt_data(r['ida'])}"
+        botoes.append([{"text": f"🔎 {rotulo}", "url": r["link"]}])
+    return {"inline_keyboard": botoes}
+
+
+def enviar_telegram(mensagem, botoes=None):
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         print("\n[Telegram não configurado] Mensagem:\n" + mensagem)
         return
-    dados = urllib.parse.urlencode(
-        {"chat_id": chat_id, "text": mensagem, "disable_web_page_preview": "true"}
-    ).encode()
+    campos = {
+        "chat_id": chat_id,
+        "text": mensagem,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": "true",
+    }
+    if botoes:
+        campos["reply_markup"] = json.dumps(botoes)
+    dados = urllib.parse.urlencode(campos).encode()
     try:
         urllib.request.urlopen(
             f"https://api.telegram.org/bot{token}/sendMessage", data=dados, timeout=30
@@ -116,6 +282,7 @@ def enviar_telegram(mensagem):
         print("\nMensagem que seria enviada:\n" + mensagem)
 
 
+# ------------------------------ HISTÓRICO ------------------------------
 def carregar_historico():
     if HISTORICO.exists():
         return json.loads(HISTORICO.read_text(encoding="utf-8"))
@@ -140,24 +307,30 @@ def main():
         print("Nenhum resultado obtido nesta execução.")
         return
 
+    converter_para_reais(resultados)
     resultados.sort(key=lambda r: r["preco"])
     melhor = resultados[0]
 
+    # compara só com execuções na mesma moeda (o histórico antigo estava em dólar)
     historico = carregar_historico()
-    anteriores = [e["melhor"]["preco"] for e in historico["execucoes"]]
+    anteriores = [
+        e["melhor"]["preco"]
+        for e in historico["execucoes"]
+        if e["melhor"].get("moeda") == melhor["moeda"]
+    ]
     ultimo = anteriores[-1] if anteriores else None
     minimo = min(anteriores) if anteriores else None
 
     motivos = []
     if not anteriores:
-        motivos.append("primeira consulta (preço de referência)")
-    if LIMITE_ALERTA is not None and melhor["preco"] <= LIMITE_ALERTA:
-        motivos.append(f"abaixo do seu limite de {LIMITE_ALERTA}")
+        motivos.append("Primeira consulta: este é o preço de referência")
+    if LIMITE_ALERTA is not None and melhor["moeda"] == "BRL" and melhor["preco"] <= LIMITE_ALERTA:
+        motivos.append(f"Abaixo do seu limite de {fmt_preco(LIMITE_ALERTA)}")
     if minimo is not None and melhor["preco"] < minimo:
-        motivos.append("novo menor preço já registrado")
+        motivos.append("Novo menor preço já registrado")
     if ultimo and melhor["preco"] <= ultimo * (1 - QUEDA_MINIMA_PCT / 100):
         queda = (1 - melhor["preco"] / ultimo) * 100
-        motivos.append(f"queda de {queda:.0f}% desde a última consulta")
+        motivos.append(f"Queda de {queda:.0f}% desde a última consulta")
 
     historico["execucoes"].append(
         {
@@ -170,18 +343,12 @@ def main():
     HISTORICO.write_text(json.dumps(historico, ensure_ascii=False, indent=2), encoding="utf-8")
 
     if motivos:
-        linhas = ["✈️ Passagens para a Turquia", "Motivo: " + "; ".join(motivos), ""]
-        for i, r in enumerate(resultados[:5], 1):
-            linhas.append(
-                f"{i}. {r['preco_texto']} | {r['origem']}->{r['destino']} | "
-                f"{r['ida']} a {r['volta']} | {r['companhia']} | "
-                f"{r['escalas']} escala(s) | {r['duracao']}"
-            )
-        linhas += ["", "Ver no Google Flights:", melhor["link"]]
-        linhas += ["", "Preço por pessoa, ida e volta, como exibido pelo Google. Reconfirme antes de comprar."]
-        enviar_telegram("\n".join(linhas))
+        enviar_telegram(montar_mensagem(resultados, motivos, ultimo, minimo), montar_botoes(resultados))
     else:
-        print(f"Sem novidades. Melhor preço agora: {melhor['preco_texto']} ({melhor['origem']}->{melhor['destino']}).")
+        print(
+            f"Sem novidades. Melhor preço agora: {fmt_preco(melhor['preco'], melhor['moeda'])} "
+            f"({melhor['origem']}->{melhor['destino']})."
+        )
 
 
 if __name__ == "__main__":
