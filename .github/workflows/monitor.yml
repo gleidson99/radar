@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write            # necessário para salvar o historico.json
 
+concurrency:
+  group: monitor-passagens   # evita duas execuções ao mesmo tempo
+  cancel-in-progress: false
+
 jobs:
   buscar:
     runs-on: ubuntu-24.04
@@ -37,6 +41,7 @@ jobs:
             git add historico.json
             if ! git diff --staged --quiet; then
               git commit -m "Atualiza histórico de preços"
+              git pull --rebase -X theirs origin main
               git push
             fi
           fi
