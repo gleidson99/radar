@@ -8,6 +8,7 @@ import json
 import os
 import re
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
@@ -104,9 +105,15 @@ def enviar_telegram(mensagem):
     dados = urllib.parse.urlencode(
         {"chat_id": chat_id, "text": mensagem, "disable_web_page_preview": "true"}
     ).encode()
-    urllib.request.urlopen(
-        f"https://api.telegram.org/bot{token}/sendMessage", data=dados, timeout=30
-    )
+    try:
+        urllib.request.urlopen(
+            f"https://api.telegram.org/bot{token}/sendMessage", data=dados, timeout=30
+        )
+        print("Mensagem enviada ao Telegram.")
+    except urllib.error.HTTPError as erro:
+        corpo = erro.read().decode("utf-8", "ignore")
+        print(f"Falha ao enviar ao Telegram: {erro.code} {corpo}")
+        print("\nMensagem que seria enviada:\n" + mensagem)
 
 
 def carregar_historico():
