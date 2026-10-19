@@ -1,0 +1,81 @@
+{
+  "execucoes": [
+    {
+      "data": "2026-10-19T22:15+00:00",
+      "melhor": {
+        "origem": "GRU",
+        "destino": "IST",
+        "ida": "2027-01-14",
+        "volta": "2027-01-29",
+        "preco": 2793,
+        "preco_texto": "$2793",
+        "companhia": "Gol, Air France",
+        "escalas": 2,
+        "duracao": "21 hr 30 min",
+        "link": "https://www.google.com/travel/flights?q=Flights%20from%20GRU%20to%20IST%20on%202027-01-14%20through%202027-01-29"
+      },
+      "top5": [
+        {
+          "origem": "GRU",
+          "destino": "IST",
+          "ida": "2027-01-14",
+          "volta": "2027-01-29",
+          "preco": 2793,
+          "preco_texto": "$2793",
+          "companhia": "Gol, Air France",
+          "escalas": 2,
+          "duracao": "21 hr 30 min",
+          "link": "https://www.google.com/travel/flights?q=Flights%20from%20GRU%20to%20IST%20on%202027-01-14%20through%202027-01-29"
+        },
+        {
+          "origem": "GRU",
+          "destino": "IST",
+          "ida": "2027-01-12",
+          "volta": "2027-01-27",
+          "preco": 2916,
+          "preco_texto": "$2916",
+          "companhia": "Gol, Air France",
+          "escalas": 2,
+          "duracao": "22 hr 20 min",
+          "link": "https://www.google.com/travel/flights?q=Flights%20from%20GRU%20to%20IST%20on%202027-01-12%20through%202027-01-27"
+        },
+        {
+          "origem": "GRU",
+          "destino": "SAW",
+          "ida": "2027-01-14",
+          "volta": "2027-01-29",
+          "preco": 2968,
+          "preco_texto": "$2968",
+          "companhia": "Iberia, Pegasus",
+          "escalas": 1,
+          "duracao": "21 hr 40 min",
+          "link": "https://www.google.com/travel/flights?q=Flights%20from%20GRU%20to%20SAW%20on%202027-01-14%20through%202027-01-29"
+        },
+        {
+          "origem": "GRU",
+          "destino": "IST",
+          "ida": "2027-01-13",
+          "volta": "2027-01-28",
+          "preco": 3065,
+          "preco_texto": "$3065",
+          "companhia": "LATAM, Air France",
+          "escalas": 2,
+          "duracao": "20 hr 10 min",
+          "link": "https://www.google.com/travel/flights?q=Flights%20from%20GRU%20to%20IST%20on%202027-01-13%20through%202027-01-28"
+        },
+        {
+          "origem": "GRU",
+          "destino": "IST",
+          "ida": "2027-01-15",
+          "volta": "2027-01-30",
+          "preco": 3273,
+          "preco_texto": "$3273",
+          "companhia": "Gol, Air France",
+          "escalas": 2,
+          "duracao": "22 hr 20 min",
+          "link": "https://www.google.com/travel/flights?q=Flights%20from%20GRU%20to%20IST%20on%202027-01-15%20through%202027-01-30"
+        }
+      ]
+    }
+  ]
+}
