@@ -76,6 +76,91 @@
           "link": "https://www.google.com/travel/flights?q=Flights%20from%20GRU%20to%20IST%20on%202027-01-15%20through%202027-01-30"
         }
       ]
+    },
+    {
+      "data": "2026-10-19T22:50+00:00",
+      "melhor": {
+        "origem": "GRU",
+        "destino": "SAW",
+        "ida": "2027-01-09",
+        "volta": "2027-01-24",
+        "preco": 0,
+        "moeda": "BRL",
+        "preco_texto": "0",
+        "companhia": "",
+        "escalas": "Unknown",
+        "duracao": "",
+        "link": "https://www.google.com/travel/flights?q=Flights%20from%20GRU%20to%20SAW%20on%202027-01-09%20through%202027-01-24",
+        "preco_original": 0,
+        "moeda_original": "USD",
+        "cotacao": 5.0725
+      },
+      "top5": [
+        {
+          "origem": "GRU",
+          "destino": "SAW",
+          "ida": "2027-01-09",
+          "volta": "2027-01-24",
+          "preco": 0,
+          "moeda": "BRL",
+          "preco_texto": "0",
+          "companhia": "",
+          "escalas": "Unknown",
+          "duracao": "",
+          "link": "https://www.google.com/travel/flights?q=Flights%20from%20GRU%20to%20SAW%20on%202027-01-09%20through%202027-01-24",
+          "preco_original": 0,
+          "moeda_original": "USD",
+          "cotacao": 5.0725
+        },
+        {
+          "origem": "GRU",
+          "destino": "SAW",
+          "ida": "2027-01-11",
+          "volta": "2027-01-26",
+          "preco": 0,
+          "moeda": "BRL",
+          "preco_texto": "0",
+          "companhia": "",
+          "escalas": "Unknown",
+          "duracao": "",
+          "link": "https://www.google.com/travel/flights?q=Flights%20from%20GRU%20to%20SAW%20on%202027-01-11%20through%202027-01-26",
+          "preco_original": 0,
+          "moeda_original": "USD",
+          "cotacao": 5.0725
+        },
+        {
+          "origem": "GRU",
+          "destino": "SAW",
+          "ida": "2027-01-12",
+          "volta": "2027-01-27",
+          "preco": 0,
+          "moeda": "BRL",
+          "preco_texto": "0",
+          "companhia": "",
+          "escalas": "Unknown",
+          "duracao": "",
+          "link": "https://www.google.com/travel/flights?q=Flights%20from%20GRU%20to%20SAW%20on%202027-01-12%20through%202027-01-27",
+          "preco_original": 0,
+          "moeda_original": "USD",
+          "cotacao": 5.0725
+        },
+        {
+          "origem": "GRU",
+          "destino": "SAW",
+          "ida": "2027-01-14",
+          "volta": "2027-01-29",
+          "preco": 0,
+          "moeda": "BRL",
+          "preco_texto": "0",
+          "companhia": "",
+          "escalas": "Unknown",
+          "duracao": "",
+          "link": "https://www.google.com/travel/flights?q=Flights%20from%20GRU%20to%20SAW%20on%202027-01-14%20through%202027-01-29",
+          "preco_original": 0,
+          "moeda_original": "USD",
+          "cotacao": 5.0725
+        }
+      ]
     }
   ]
 }
