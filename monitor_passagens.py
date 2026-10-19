@@ -31,6 +31,7 @@ LIMITE_ALERTA = None                 # em R$, ex.: 15000 -> avisa sempre que fic
 QUEDA_MINIMA_PCT = 5                 # avisa se cair 5% ou mais vs. última execução
 PAUSA_ENTRE_BUSCAS = 3               # segundos, para não sobrecarregar o Google
 HISTORICO = Path(__file__).with_name("historico.json")
+MILHAS = Path(__file__).with_name("milhas.json")
 
 AEROPORTOS = {
     "CNF": "Confins",
@@ -96,6 +97,10 @@ def cotacao_para_brl(moeda):
 def fmt_preco(valor, moeda="BRL"):
     texto = f"{valor:,.0f}".replace(",", ".")
     return f"{SIMBOLOS.get(moeda, moeda)} {texto}"
+
+
+def fmt_num(valor):
+    return f"{valor:,.0f}".replace(",", ".")
 
 
 def fmt_data(iso):
@@ -198,7 +203,7 @@ def converter_para_reais(resultados):
 
 
 # ------------------------------ TELEGRAM -------------------------------
-def montar_mensagem(resultados, motivos, ultimo, minimo):
+def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
     melhor = resultados[0]
     moeda = melhor["moeda"]
     e = html.escape
@@ -239,6 +244,8 @@ def montar_mensagem(resultados, motivos, ultimo, minimo):
                 f"{fmt_escalas(r['escalas'], curto=True)} · {fmt_duracao(r['duracao'])}"
             )
 
+    linhas += secao_milhas(melhor, milhas_cfg or {})
+
     linhas.append("")
     if melhor.get("cotacao"):
         simbolo = SIMBOLOS.get(melhor["moeda_original"], melhor["moeda_original"])
@@ -246,6 +253,52 @@ def montar_mensagem(resultados, motivos, ultimo, minimo):
         linhas.append(f"💱 Convertido de {simbolo} a R$ {taxa} (valor aproximado)")
     linhas.append("<i>Valores ida e volta, como exibidos no Google Flights. Reconfirme antes de comprar.</i>")
     return "\n".join(linhas)
+
+
+def carregar_milhas():
+    """Lê milhas.json (valor do milheiro e ofertas em milhas que você encontrou)."""
+    if MILHAS.exists():
+        try:
+            return json.loads(MILHAS.read_text(encoding="utf-8"))
+        except Exception as erro:
+            print(f"  ! milhas.json inválido: {erro}")
+    return {}
+
+
+def secao_milhas(melhor, cfg):
+    valor = cfg.get("valor_milheiro")
+    if not valor or melhor["moeda"] != "BRL":
+        return []
+    e = html.escape
+    teto = melhor["preco"] / valor * 1000
+    linhas = [
+        "",
+        "<b>✨ Milhas</b>",
+        f"🎯 Vale usar milhas se a passagem-prêmio custar menos de ~{fmt_num(teto)} milhas "
+        f"(milheiro a {fmt_preco(valor)}, sem contar taxas)",
+    ]
+    ofertas = []
+    for o in cfg.get("ofertas", []):
+        if not o.get("milhas"):
+            continue
+        equivalente = o["milhas"] / 1000 * valor + o.get("taxas", 0)
+        ofertas.append((equivalente, o))
+    ofertas.sort(key=lambda x: x[0])
+    for equivalente, o in ofertas[:3]:
+        var = (equivalente - melhor["preco"]) / melhor["preco"] * 100
+        if var < 0:
+            comparativo = f"{abs(var):.0f}% mais barato que o dinheiro 👍"
+        else:
+            comparativo = f"{var:.0f}% mais caro que o dinheiro"
+        taxas = f" + {fmt_preco(o['taxas'])}" if o.get("taxas") else ""
+        obs = f" · {e(o['obs'])}" if o.get("obs") else ""
+        linhas.append(
+            f"💳 {e(o.get('programa', 'Programa'))}: {fmt_num(o['milhas'])} milhas{taxas} "
+            f"≈ {fmt_preco(equivalente)} ({comparativo}){obs}"
+        )
+    if not ofertas:
+        linhas.append("ℹ️ Sem ofertas em milhas cadastradas em milhas.json")
+    return linhas
 
 
 def montar_botoes(resultados):
@@ -343,7 +396,10 @@ def main():
     HISTORICO.write_text(json.dumps(historico, ensure_ascii=False, indent=2), encoding="utf-8")
 
     if motivos:
-        enviar_telegram(montar_mensagem(resultados, motivos, ultimo, minimo), montar_botoes(resultados))
+        enviar_telegram(
+            montar_mensagem(resultados, motivos, ultimo, minimo, carregar_milhas()),
+            montar_botoes(resultados),
+        )
     else:
         print(
             f"Sem novidades. Melhor preço agora: {fmt_preco(melhor['preco'], melhor['moeda'])} "
