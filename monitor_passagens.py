@@ -76,10 +76,10 @@ async def _baixar_pagina(url):
                         await botao.first.click()
                         break
             try:
-                await pagina.locator(".eQ35Ce").first.wait_for(state="visible", timeout=40000)
+                await pagina.locator(".eQ35Ce").first.wait_for(state="visible", timeout=60000)
             except Exception:
                 try:
-                    corpo = (await pagina.inner_text("body"))[:300].replace("\n", " | ")
+                    corpo = (await pagina.inner_text("body"))[:1500].replace("\n", " | ")
                 except Exception:
                     corpo = "?"
                 print(f"  ? página recebida: título={await pagina.title()!r} url={pagina.url[:120]!r}")
@@ -203,33 +203,55 @@ def link_busca(origem, destino, ida, volta):
     return "https://www.google.com/travel/flights?q=" + urllib.parse.quote(q)
 
 
+_CRIANCA_COMO_ADULTO = False  # vira True se só a busca com 3 adultos funcionar
+
+
+def _variantes():
+    base = (ADULTOS, CRIANCAS)
+    alternativa = (ADULTOS + CRIANCAS, 0)
+    if CRIANCAS == 0:
+        return [base]
+    return [alternativa] if _CRIANCA_COMO_ADULTO else [base, alternativa]
+
+
 def buscar(origem, destino, ida, volta):
     """Retorna a opção mais barata para a combinação, ou None."""
+    global _CRIANCA_COMO_ADULTO
     resultado = None
-    for tentativa in range(2):
-        try:
-            resultado = get_flights(
-                flight_data=[
-                    FlightData(date=ida.isoformat(), from_airport=origem, to_airport=destino),
-                    FlightData(date=volta.isoformat(), from_airport=destino, to_airport=origem),
-                ],
-                trip="round-trip",
-                seat="economy",
-                passengers=Passengers(
-                    adults=ADULTOS, children=CRIANCAS, infants_in_seat=0, infants_on_lap=0
-                ),
-                fetch_mode="local",
-            )
-            break
-        except Exception as erro:  # a lib é não oficial: falhas acontecem
-            texto = str(erro)
-            print(f"  ! {origem}->{destino} {ida}: tentativa {tentativa + 1} falhou ({texto[:200]})")
-            if "turnstile" in texto.lower() or "no token" in texto.lower():
-                print("  ! o serviço remoto de fallback foi usado e está bloqueado; não adianta repetir")
+    usou = None
+    for adultos, criancas in _variantes():
+        for tentativa in range(2):
+            try:
+                resultado = get_flights(
+                    flight_data=[
+                        FlightData(date=ida.isoformat(), from_airport=origem, to_airport=destino),
+                        FlightData(date=volta.isoformat(), from_airport=destino, to_airport=origem),
+                    ],
+                    trip="round-trip",
+                    seat="economy",
+                    passengers=Passengers(
+                        adults=adultos, children=criancas, infants_in_seat=0, infants_on_lap=0
+                    ),
+                    fetch_mode="local",
+                )
+                usou = (adultos, criancas)
                 break
-            time.sleep(5 * (tentativa + 1))
+            except Exception as erro:  # a lib é não oficial: falhas acontecem
+                texto = str(erro)
+                print(
+                    f"  ! {origem}->{destino} {ida} [{adultos} adulto(s) + {criancas} criança(s)]: "
+                    f"tentativa {tentativa + 1} falhou ({texto[:200]})"
+                )
+                if "turnstile" in texto.lower() or "no token" in texto.lower():
+                    break
+                time.sleep(5)
+        if resultado is not None:
+            break
     if resultado is None:
         return None
+    if usou and CRIANCAS and usou[1] == 0 and not _CRIANCA_COMO_ADULTO:
+        _CRIANCA_COMO_ADULTO = True
+        print("  >>> só a busca com a criança contada como adulto funcionou; usando assim nas próximas")
 
     opcoes = []
     for voo in resultado.flights:
@@ -257,6 +279,7 @@ def buscar(origem, destino, ida, volta):
         "escalas": voo.stops,
         "duracao": voo.duration,
         "link": link_busca(origem, destino, ida, volta),
+        "crianca_como_adulto": bool(CRIANCAS and usou and usou[1] == 0),
     }
 
 
@@ -340,6 +363,8 @@ def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
         simbolo = SIMBOLOS.get(melhor["moeda_original"], melhor["moeda_original"])
         taxa = f"{melhor['cotacao']:.2f}".replace(".", ",")
         linhas.append(f"💱 Convertido de {simbolo} a R$ {taxa} (valor aproximado)")
+    if melhor.get("crianca_como_adulto"):
+        linhas.append("👶 Preço calculado com 3 adultos; a criança de 6 anos costuma pagar um pouco menos")
     if any(r.get("ajuste") for r in resultados[:5]):
         linhas.append("✚ inclui o deslocamento CNF↔GRU por pessoa, ida e volta")
     linhas.append("<i>Valores ida e volta, como exibidos no Google Flights. Reconfirme antes de comprar.</i>")
