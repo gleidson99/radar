@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Monitor de passagens CNF/GRU -> Turquia (ida e volta, 15 dias).
+"""Monitor de passagens CNF/GRU -> Tbilisi, Geórgia (ida e volta, 15 a 20 dias).
 
 Consulta o Google Flights (via biblioteca não oficial fast-flights), converte os
 preços para reais, guarda o histórico em historico.json e avisa pelo Telegram
@@ -21,7 +21,7 @@ from fast_flights import FlightData, Passengers, get_flights
 
 # ---------------------------- CONFIGURAÇÃO ----------------------------
 ORIGENS = ["CNF", "GRU"]
-DESTINOS = ["IST", "SAW"]            # Istambul (aeroporto principal e Sabiha Gökçen)
+DESTINOS = ["TBS"]                   # Tbilisi, Geórgia
 IDA_DE = date(2027, 1, 8)            # primeira data de ida a considerar
 IDA_ATE = date(2027, 1, 31)          # última data de ida (a volta pode cair em fevereiro)
 ESTADIA_MIN = 15                     # dias fora, no mínimo
@@ -46,6 +46,7 @@ AEROPORTOS = {
     "GRU": "Guarulhos",
     "IST": "Istambul",
     "SAW": "Istambul (Sabiha Gökçen)",
+    "TBS": "Tbilisi",
 }
 SIMBOLOS = {"BRL": "R$", "USD": "US$", "EUR": "€"}
 MEDALHAS = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
@@ -322,7 +323,7 @@ def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
     moeda = melhor["moeda"]
     e = html.escape
 
-    linhas = ["✈️ <b>Radar de passagens · Turquia</b>", ""]
+    linhas = ["✈️ <b>Radar de passagens · Geórgia</b>", ""]
     linhas.append("🔔 <i>" + e(" · ".join(motivos)) + "</i>")
     linhas += [
         "",
