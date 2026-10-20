@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Sondagem do Azul pelo Mundo: abre a página de resultados num navegador, captura a
-resposta de /api/availability e imprime a estrutura. Serve para descobrir se o site
-atende o servidor do GitHub e como ler os preços em pontos."""
+"""Sondagem do Azul pelo Mundo (para rodar no SEU computador).
+
+Abre a página de resultados no Chrome (com janela visível), captura a resposta de
+/api/availability, imprime a estrutura e salva a resposta em azul_amostra.json.
+Serve para descobrir como ler os preços em pontos."""
 import asyncio
 import json
 
@@ -10,10 +12,6 @@ from playwright.async_api import async_playwright
 URL = (
     "https://azulpelomundo.voeazul.com.br/flights/RT/GRU/IST/-/-/"
     "2027-01-14/2027-01-29/2/1/0/0/0/ALL/F/ECONOMY/-/-/-/-/A/-"
-)
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
 
@@ -30,10 +28,13 @@ def forma(o, d=0):
 async def main():
     capturas = []
     async with async_playwright() as p:
-        navegador = await p.chromium.launch(args=["--disable-blink-features=AutomationControlled"])
+        try:
+            navegador = await p.chromium.launch(channel="chrome", headless=False)
+        except Exception:
+            print("(Chrome instalado não encontrado; usando o Chromium do Playwright)")
+            navegador = await p.chromium.launch(headless=False)
         contexto = await navegador.new_context(
-            user_agent=USER_AGENT, locale="pt-BR", timezone_id="America/Sao_Paulo",
-            viewport={"width": 1366, "height": 900},
+            locale="pt-BR", timezone_id="America/Sao_Paulo", viewport={"width": 1366, "height": 900},
         )
         pagina = await contexto.new_page()
 
@@ -51,7 +52,8 @@ async def main():
             await pagina.goto(URL, wait_until="domcontentloaded", timeout=60000)
         except Exception as erro:
             print(f"! falha ao abrir: {erro}")
-        for _ in range(45):
+        print("Se aparecer alguma verificação na janela, resolva-a manualmente. Aguardando até 90 s...")
+        for _ in range(90):
             if capturas:
                 break
             await asyncio.sleep(1)
@@ -71,6 +73,9 @@ async def main():
         except Exception:
             print("Corpo (não é JSON):", corpo[:800])
             continue
+        with open("azul_amostra.json", "w", encoding="utf-8") as f:
+            json.dump(dados, f, ensure_ascii=False, indent=1)
+        print("Resposta completa salva em azul_amostra.json")
         print("ESTRUTURA:", json.dumps(forma(dados), ensure_ascii=False, indent=1)[:4000])
         print("AMOSTRA:", json.dumps(dados, ensure_ascii=False)[:6000])
 
