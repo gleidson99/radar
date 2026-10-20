@@ -96,10 +96,27 @@ async def _baixar_pagina(url):
             await navegador.close()
 
 
+_BUSCA_ATUAL = {}
+
+
 def navegador_local(params):
     params = dict(params)
     params["curr"] = "BRL"  # pede os preços direto em reais
-    url = "https://www.google.com/travel/flights?" + "&".join(f"{k}={v}" for k, v in params.items())
+    b = _BUSCA_ATUAL
+    if b and os.getenv("LINK_TEXTO", "1") == "1":
+        # link em texto (q=): o próprio Google interpreta origem, destino, datas e passageiros
+        q = (
+            f"Flights from {b['origem']} to {b['destino']} on {b['ida']} through {b['volta']} "
+            f"for {b['adultos']} adults {b['criancas']} children economy"
+            if b["criancas"]
+            else f"Flights from {b['origem']} to {b['destino']} on {b['ida']} through {b['volta']} "
+            f"for {b['adultos']} adults economy"
+        )
+        url = "https://www.google.com/travel/flights?" + urllib.parse.urlencode(
+            {"q": q, "curr": "BRL", "hl": "en", "gl": "br"}
+        )
+    else:
+        url = "https://www.google.com/travel/flights?" + "&".join(f"{k}={v}" for k, v in params.items())
     corpo = asyncio.run(_baixar_pagina(url))
 
     class Resposta:
@@ -308,6 +325,8 @@ def buscar(origem, destino, ida, volta):
     for adultos, criancas in _variantes():
         for tentativa in range(2):
             try:
+                _BUSCA_ATUAL.update(origem=origem, destino=destino, ida=ida.isoformat(),
+                                    volta=volta.isoformat(), adultos=adultos, criancas=criancas)
                 resultado = get_flights(
                     flight_data=[
                         FlightData(date=ida.isoformat(), from_airport=origem, to_airport=destino),
