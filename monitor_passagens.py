@@ -5,6 +5,7 @@ Consulta o Google Flights (via biblioteca não oficial fast-flights), converte o
 preços para reais, guarda o histórico em historico.json e avisa pelo Telegram
 quando o preço cai.
 """
+import asyncio
 import html
 import json
 import os
@@ -42,6 +43,70 @@ AEROPORTOS = {
 SIMBOLOS = {"BRL": "R$", "USD": "US$", "EUR": "€"}
 MEDALHAS = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
 # -----------------------------------------------------------------------
+
+
+# ------------------- NAVEGADOR LOCAL (substitui o da biblioteca) -------------------
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
+
+async def _baixar_pagina(url):
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as p:
+        navegador = await p.chromium.launch(
+            args=["--disable-blink-features=AutomationControlled"]
+        )
+        try:
+            contexto = await navegador.new_context(
+                user_agent=USER_AGENT,
+                locale="en-US",
+                timezone_id="America/Sao_Paulo",
+                viewport={"width": 1366, "height": 900},
+            )
+            pagina = await contexto.new_page()
+            await pagina.goto(url, wait_until="domcontentloaded", timeout=60000)
+            if "consent.google.com" in pagina.url:
+                for rotulo in ("Accept all", "Aceitar tudo", "Reject all", "Rejeitar tudo"):
+                    botao = pagina.get_by_role("button", name=rotulo)
+                    if await botao.count():
+                        await botao.first.click()
+                        break
+            try:
+                await pagina.locator(".eQ35Ce").first.wait_for(state="visible", timeout=40000)
+            except Exception:
+                try:
+                    corpo = (await pagina.inner_text("body"))[:300].replace("\n", " | ")
+                except Exception:
+                    corpo = "?"
+                print(f"  ? página recebida: título={await pagina.title()!r} url={pagina.url[:120]!r}")
+                print(f"  ? texto: {corpo}")
+                raise RuntimeError("a página de resultados do Google não carregou")
+            return await pagina.evaluate("document.querySelector('[role=\"main\"]').innerHTML")
+        finally:
+            await navegador.close()
+
+
+def navegador_local(params):
+    url = "https://www.google.com/travel/flights?" + "&".join(f"{k}={v}" for k, v in params.items())
+    corpo = asyncio.run(_baixar_pagina(url))
+
+    class Resposta:
+        status_code = 200
+        text = corpo
+        text_markdown = corpo
+
+    return Resposta
+
+
+try:
+    import fast_flights.local_playwright as _lp
+
+    _lp.local_playwright_fetch = navegador_local
+except Exception as _erro:  # se a biblioteca mudar, cai no comportamento padrão
+    print(f"(não foi possível trocar o navegador local: {_erro})")
 
 
 # ------------------------------ PREÇOS ---------------------------------
@@ -140,7 +205,7 @@ def link_busca(origem, destino, ida, volta):
 def buscar(origem, destino, ida, volta):
     """Retorna a opção mais barata para a combinação, ou None."""
     resultado = None
-    for tentativa in range(3):
+    for tentativa in range(2):
         try:
             resultado = get_flights(
                 flight_data=[
@@ -379,8 +444,8 @@ def main():
                     falhas_seguidas = 0
                 else:
                     falhas_seguidas += 1
-                    if falhas_seguidas >= 6 and not resultados:
-                        print("Abortando: 6 buscas seguidas sem resultado. Veja os erros acima.")
+                    if falhas_seguidas >= 3 and not resultados:
+                        print("Abortando: 3 buscas seguidas sem resultado. Veja os erros acima.")
                         raise SystemExit(1)
                 time.sleep(PAUSA_ENTRE_BUSCAS)
         ida += timedelta(days=1)
