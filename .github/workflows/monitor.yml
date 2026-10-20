@@ -1,8 +1,7 @@
 name: Monitor de passagens
 
 on:
-  schedule:
-    - cron: "0 */6 * * *"   # a cada 6 horas (horário UTC)
+  # agendamento desativado: o Google não atende o servidor do GitHub; rode localmente (ver README)
   workflow_dispatch:         # permite rodar manualmente pelo botão "Run workflow"
 
 permissions:

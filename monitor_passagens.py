@@ -10,6 +10,7 @@ import html
 import json
 import os
 import re
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -30,7 +31,7 @@ ESTADIA_MAX = 20                     # dias fora, no máximo
 PASSO_IDA_AMOSTRA = 3                # fase 1: testa uma data de ida a cada 3 dias
 ESTADIAS_AMOSTRA = (15, 17, 20)      # fase 1: e só estas durações de estadia
 MELHORES_PARA_REFINAR = 2            # fase 2: detalha ao redor dos 2 melhores (±1 dia, todas as estadias)
-MAX_BUSCAS = 100                     # limite de consultas por rodada
+MAX_BUSCAS = int(os.getenv("MAX_BUSCAS", "100"))   # limite de consultas por rodada (varredura completa)
 ADULTOS = 2
 CRIANCAS = 1                         # criança de 6 anos (faixa de 2 a 11 anos)
 MAX_ESCALAS = 2                      # None = sem filtro
@@ -38,7 +39,11 @@ LIMITE_ALERTA = None                 # em R$, ex.: 15000 -> avisa sempre que fic
 CUSTO_TRECHO_ATE_GRU = 250           # R$ por pessoa, por trecho, de Confins até Guarulhos (ida e volta = 2 trechos)
 QUEDA_MINIMA_PCT = 5                 # avisa se cair 5% ou mais vs. última execução
 PAUSA_ENTRE_BUSCAS = 3               # segundos, para não sobrecarregar o Google
-HISTORICO = Path(__file__).with_name("historico.json")
+PASTA = Path(__file__).resolve().parent
+HISTORICO = PASTA / "historico.json"
+ESTADO = PASTA / "estado.json"
+VER_JANELA = os.getenv("VER_JANELA") == "1"   # 1 = mostra a janela do Chrome (para testes)
+MODO_TESTE = os.getenv("TESTE") == "1"          # 1 = não grava histórico (teste de instalação)
 MILHAS = Path(__file__).with_name("milhas.json")
 
 AEROPORTOS = {
@@ -54,22 +59,16 @@ MEDALHAS = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
 
 
 # ------------------- NAVEGADOR LOCAL (substitui o da biblioteca) -------------------
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
-
-
 async def _baixar_pagina(url):
     from playwright.async_api import async_playwright
 
     async with async_playwright() as p:
-        navegador = await p.chromium.launch(
-            args=["--disable-blink-features=AutomationControlled"]
-        )
+        try:
+            navegador = await p.chromium.launch(channel="chrome", headless=not VER_JANELA)
+        except Exception:  # Chrome não instalado (ex.: GitHub): usa o Chromium do Playwright
+            navegador = await p.chromium.launch(headless=not VER_JANELA)
         try:
             contexto = await navegador.new_context(
-                user_agent=USER_AGENT,
                 locale="en-US",
                 timezone_id="America/Sao_Paulo",
                 viewport={"width": 1366, "height": 900},
@@ -98,6 +97,8 @@ async def _baixar_pagina(url):
 
 
 def navegador_local(params):
+    params = dict(params)
+    params["curr"] = "BRL"  # pede os preços direto em reais
     url = "https://www.google.com/travel/flights?" + "&".join(f"{k}={v}" for k, v in params.items())
     corpo = asyncio.run(_baixar_pagina(url))
 
@@ -115,6 +116,84 @@ try:
     _lp.local_playwright_fetch = navegador_local
 except Exception as _erro:  # se a biblioteca mudar, cai no comportamento padrão
     print(f"(não foi possível trocar o navegador local: {_erro})")
+
+
+# --------------------- SEGREDOS, LOG E ESTADO (execução local) ---------------------
+def carregar_segredos():
+    """Lê segredos.txt (TELEGRAM_BOT_TOKEN=... e TELEGRAM_CHAT_ID=...) se existir."""
+    arq = PASTA / "segredos.txt"
+    if not arq.exists():
+        return
+    for linha in arq.read_text(encoding="utf-8").splitlines():
+        linha = linha.strip()
+        if not linha or linha.startswith("#") or "=" not in linha:
+            continue
+        chave, valor = linha.split("=", 1)
+        os.environ.setdefault(chave.strip(), valor.strip().strip('"').strip("'"))
+
+
+def configurar_log():
+    """Copia tudo o que é impresso para log_monitor.txt (útil quando roda sem janela)."""
+    arq = PASTA / "log_monitor.txt"
+    try:
+        if arq.exists() and arq.stat().st_size > 1_500_000:
+            arq.replace(PASTA / "log_monitor.antigo.txt")
+        arquivo = open(arq, "a", encoding="utf-8", buffering=1)
+    except Exception:
+        return
+
+    class Tee:
+        def __init__(self, *fluxos):
+            self.fluxos = [f for f in fluxos if f]
+
+        def write(self, texto):
+            for f in self.fluxos:
+                try:
+                    f.write(texto)
+                except Exception:
+                    pass
+
+        def flush(self):
+            for f in self.fluxos:
+                try:
+                    f.flush()
+                except Exception:
+                    pass
+
+    arquivo.write(f"\n===== {datetime.now().isoformat(timespec='seconds')} =====\n")
+    sys.stdout = Tee(sys.stdout, arquivo)
+    sys.stderr = Tee(sys.stderr, arquivo)
+
+
+def _ler_estado():
+    try:
+        return json.loads(ESTADO.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def registrar_sucesso():
+    if MODO_TESTE:
+        return
+    est = _ler_estado()
+    if est.get("falhas_seguidas"):
+        est["falhas_seguidas"] = 0
+        ESTADO.write_text(json.dumps(est), encoding="utf-8")
+
+
+def registrar_falha(motivo):
+    """Conta execuções sem resultado e avisa no Telegram após 3 e depois após 24 seguidas."""
+    if MODO_TESTE:
+        return
+    est = _ler_estado()
+    n = est.get("falhas_seguidas", 0) + 1
+    est["falhas_seguidas"] = n
+    ESTADO.write_text(json.dumps(est), encoding="utf-8")
+    if n in (3, 24):
+        enviar_telegram(
+            f"⚠️ O monitor não conseguiu consultar os preços há {n} execuções seguidas.\n"
+            f"{motivo}\nConfira o arquivo log_monitor.txt na pasta do monitor."
+        )
 
 
 # ------------------------------ PREÇOS ---------------------------------
@@ -469,78 +548,118 @@ def datas_de_ida(passo=1):
         ida += timedelta(days=passo)
 
 
+def escolher_modo(historico):
+    """Varredura completa 1x por dia; nas demais horas, só reconfere os melhores achados."""
+    forcado = os.getenv("MODO", "").lower()
+    if forcado in ("completo", "rapido"):
+        return forcado
+    for e in reversed(historico["execucoes"]):
+        if e.get("modo", "completo") == "completo":
+            try:
+                idade = datetime.now(timezone.utc) - datetime.fromisoformat(e["data"])
+                if idade < timedelta(hours=22):
+                    return "rapido"
+            except Exception:
+                pass
+            break
+    return "completo"
+
+
 def main():
     diagnostico()
+    historico = carregar_historico()
+    # ignora execuções antigas de outros destinos
+    historico["execucoes"] = [
+        e for e in historico["execucoes"] if e.get("melhor", {}).get("destino") in DESTINOS
+    ]
+    modo = escolher_modo(historico)
+    candidatos = []
+    if modo == "rapido":
+        for r in historico["execucoes"][-1].get("top5", []):
+            candidatos.append(
+                (r["origem"], r["destino"], date.fromisoformat(r["ida"]), date.fromisoformat(r["volta"]))
+            )
+        if not candidatos:
+            modo = "completo"
+    print(f"Modo: {modo}" + (" (TESTE: não grava histórico)" if MODO_TESTE else ""))
+
     cache = {}            # (origem, destino, ida, volta) -> resultado ou None
-    estado = {"falhas": 0, "buscas": 0}
+    cont = {"falhas": 0, "buscas": 0}
 
     def consultar(origem, destino, ida, volta):
         chave = (origem, destino, ida, volta)
         if chave in cache:
             return cache[chave]
-        if estado["buscas"] >= MAX_BUSCAS:
+        if cont["buscas"] >= MAX_BUSCAS:
             return None
-        estado["buscas"] += 1
-        print(f"[{estado['buscas']}/{MAX_BUSCAS}] Buscando {origem}->{destino} {ida} / {volta} ({(volta - ida).days} dias)")
+        cont["buscas"] += 1
+        print(f"[{cont['buscas']}] Buscando {origem}->{destino} {ida} / {volta} ({(volta - ida).days} dias)")
         achado = buscar(origem, destino, ida, volta)
         cache[chave] = achado
         if achado:
-            estado["falhas"] = 0
+            cont["falhas"] = 0
         else:
-            estado["falhas"] += 1
-            if estado["falhas"] >= 3 and not any(cache.values()):
+            cont["falhas"] += 1
+            if cont["falhas"] >= 3 and not any(cache.values()):
                 print("Abortando: 3 buscas seguidas sem resultado. Veja os erros acima.")
+                registrar_falha("O Google Flights não devolveu preços.")
                 raise SystemExit(1)
         time.sleep(PAUSA_ENTRE_BUSCAS)
         return achado
 
-    # Fase 1: amostra espalhada pelo período (só Istambul principal)
-    print(f"Fase 1: saídas de {IDA_DE} a {IDA_ATE}, estadias {ESTADIAS_AMOSTRA}")
-    for ida in datas_de_ida(PASSO_IDA_AMOSTRA):
-        for estadia in ESTADIAS_AMOSTRA:
-            for origem in ORIGENS:
-                consultar(origem, DESTINOS[0], ida, ida + timedelta(days=estadia))
+    if modo == "rapido":
+        print(f"Reconferindo {len(candidatos)} melhores combinações da última varredura")
+        for c in candidatos:
+            consultar(*c)
+    else:
+        # Fase 1: amostra espalhada pelo período
+        print(f"Fase 1: saídas de {IDA_DE} a {IDA_ATE}, estadias {ESTADIAS_AMOSTRA}")
+        for ida in datas_de_ida(PASSO_IDA_AMOSTRA):
+            for estadia in ESTADIAS_AMOSTRA:
+                for origem in ORIGENS:
+                    consultar(origem, DESTINOS[0], ida, ida + timedelta(days=estadia))
 
-    # Fase 2: detalha ao redor dos melhores achados
-    fase1 = sorted((r for r in cache.values() if r), key=lambda r: r["preco"])
-    escolhidos, vistos = [], set()
-    for r in fase1:
-        chave = (r["origem"], r["ida"])
-        if chave not in vistos:
-            vistos.add(chave)
-            escolhidos.append(r)
-        if len(escolhidos) >= MELHORES_PARA_REFINAR:
-            break
-    print(f"Fase 2: refinando ao redor de {[(r['origem'], r['ida']) for r in escolhidos]}")
-    for r in escolhidos:
-        ida_base = date.fromisoformat(r["ida"])
-        for delta in (-1, 0, 1):
-            ida = ida_base + timedelta(days=delta)
-            if not (IDA_DE <= ida <= IDA_ATE):
-                continue
-            for estadia in range(ESTADIA_MIN, ESTADIA_MAX + 1):
-                consultar(r["origem"], DESTINOS[0], ida, ida + timedelta(days=estadia))
+        # Fase 2: detalha ao redor dos melhores achados
+        fase1 = sorted((r for r in cache.values() if r), key=lambda r: r["preco"])
+        escolhidos, vistos = [], set()
+        for r in fase1:
+            chave = (r["origem"], r["ida"])
+            if chave not in vistos:
+                vistos.add(chave)
+                escolhidos.append(r)
+            if len(escolhidos) >= MELHORES_PARA_REFINAR:
+                break
+        print(f"Fase 2: refinando ao redor de {[(r['origem'], r['ida']) for r in escolhidos]}")
+        for r in escolhidos:
+            ida_base = date.fromisoformat(r["ida"])
+            for delta in (-1, 0, 1):
+                ida = ida_base + timedelta(days=delta)
+                if not (IDA_DE <= ida <= IDA_ATE):
+                    continue
+                for estadia in range(ESTADIA_MIN, ESTADIA_MAX + 1):
+                    consultar(r["origem"], DESTINOS[0], ida, ida + timedelta(days=estadia))
 
-    # Fase 3: confere os outros aeroportos de destino só nas melhores datas
-    atuais = sorted((r for r in cache.values() if r), key=lambda r: r["preco"])
-    for r in atuais[:MELHORES_PARA_REFINAR]:
-        for destino in DESTINOS[1:]:
-            consultar(r["origem"], destino, date.fromisoformat(r["ida"]), date.fromisoformat(r["volta"]))
+        # Fase 3: confere os outros aeroportos de destino (se houver) nas melhores datas
+        atuais = sorted((r for r in cache.values() if r), key=lambda r: r["preco"])
+        for r in atuais[:MELHORES_PARA_REFINAR]:
+            for destino in DESTINOS[1:]:
+                consultar(r["origem"], destino, date.fromisoformat(r["ida"]), date.fromisoformat(r["volta"]))
 
     resultados = [r for r in cache.values() if r]
-    print(f"Consultas feitas: {estado['buscas']} · com resultado: {len(resultados)}")
+    print(f"Consultas feitas: {cont['buscas']} · com resultado: {len(resultados)}")
 
     if not resultados:
         print("Nenhum resultado obtido nesta execução.")
+        registrar_falha("Nenhuma consulta retornou preços.")
         return
+    registrar_sucesso()
 
     converter_para_reais(resultados)
     aplicar_custo_ate_gru(resultados)
     resultados.sort(key=lambda r: r["preco"])
     melhor = resultados[0]
 
-    # compara só com execuções na mesma moeda (o histórico antigo estava em dólar)
-    historico = carregar_historico()
+    # compara só com execuções na mesma moeda
     anteriores = [
         e["melhor"]["preco"]
         for e in historico["execucoes"]
@@ -550,7 +669,9 @@ def main():
     minimo = min(anteriores) if anteriores else None
 
     motivos = []
-    if not anteriores:
+    if MODO_TESTE:
+        motivos.append("🧪 Teste de instalação: o monitor está funcionando")
+    if not anteriores and not MODO_TESTE:
         motivos.append("Primeira consulta: este é o preço de referência")
     if LIMITE_ALERTA is not None and melhor["moeda"] == "BRL" and melhor["preco"] <= LIMITE_ALERTA:
         motivos.append(f"Abaixo do seu limite de {fmt_preco(LIMITE_ALERTA)}")
@@ -559,16 +680,20 @@ def main():
     if ultimo and melhor["preco"] <= ultimo * (1 - QUEDA_MINIMA_PCT / 100):
         queda = (1 - melhor["preco"] / ultimo) * 100
         motivos.append(f"Queda de {queda:.0f}% desde a última consulta")
+    if modo == "completo" and not motivos:
+        motivos.append("Resumo diário (varredura completa)")
 
-    historico["execucoes"].append(
-        {
-            "data": datetime.now(timezone.utc).isoformat(timespec="minutes"),
-            "melhor": melhor,
-            "top5": resultados[:5],
-        }
-    )
-    historico["execucoes"] = historico["execucoes"][-200:]
-    HISTORICO.write_text(json.dumps(historico, ensure_ascii=False, indent=2), encoding="utf-8")
+    if not MODO_TESTE:
+        historico["execucoes"].append(
+            {
+                "data": datetime.now(timezone.utc).isoformat(timespec="minutes"),
+                "modo": modo,
+                "melhor": melhor,
+                "top5": resultados[:5],
+            }
+        )
+        historico["execucoes"] = historico["execucoes"][-300:]
+        HISTORICO.write_text(json.dumps(historico, ensure_ascii=False, indent=2), encoding="utf-8")
 
     if motivos:
         enviar_telegram(
@@ -582,5 +707,26 @@ def main():
         )
 
 
+def executar_com_trava():
+    """Evita duas execuções ao mesmo tempo (ex.: varredura longa + próxima hora)."""
+    carregar_segredos()
+    configurar_log()
+    trava = PASTA / "monitor.lock"
+    try:
+        if trava.exists() and time.time() - trava.stat().st_mtime < 2 * 3600:
+            print("Outra execução ainda está em andamento; saindo.")
+            return
+        trava.write_text(str(os.getpid()))
+    except Exception:
+        pass
+    try:
+        main()
+    finally:
+        try:
+            trava.unlink()
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
-    main()
+    executar_com_trava()

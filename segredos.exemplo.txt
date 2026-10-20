@@ -1,0 +1,3 @@
+# Copie este arquivo para segredos.txt e preencha. NUNCA envie segredos.txt ao GitHub.
+TELEGRAM_BOT_TOKEN=cole_o_token_aqui
+TELEGRAM_CHAT_ID=1882704382

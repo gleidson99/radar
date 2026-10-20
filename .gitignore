@@ -1,2 +1,7 @@
 azul_amostra.json
 __pycache__/
+
+segredos.txt
+estado.json
+monitor.lock
+log_monitor*.txt
