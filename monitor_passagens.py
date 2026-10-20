@@ -156,7 +156,11 @@ def buscar(origem, destino, ida, volta):
             )
             break
         except Exception as erro:  # a lib é não oficial: falhas acontecem
-            print(f"  ! {origem}->{destino} {ida}: tentativa {tentativa + 1} falhou ({erro})")
+            texto = str(erro)
+            print(f"  ! {origem}->{destino} {ida}: tentativa {tentativa + 1} falhou ({texto[:200]})")
+            if "turnstile" in texto.lower() or "no token" in texto.lower():
+                print("  ! o serviço remoto de fallback foi usado e está bloqueado; não adianta repetir")
+                break
             time.sleep(5 * (tentativa + 1))
     if resultado is None:
         return None
@@ -344,8 +348,25 @@ def carregar_historico():
     return {"execucoes": []}
 
 
+def diagnostico():
+    """Mostra a versão da biblioteca e como ela trata o modo de busca (ajuda a achar erros)."""
+    try:
+        import importlib.metadata as md
+        import inspect
+
+        from fast_flights import core
+
+        print("fast-flights", md.version("fast-flights"), "| playwright", md.version("playwright"))
+        fonte = inspect.getsource(core.get_flights_from_filter)
+        print("\n".join(l for l in fonte.splitlines() if "mode" in l))
+    except Exception as erro:
+        print(f"(diagnóstico indisponível: {erro})")
+
+
 def main():
+    diagnostico()
     resultados = []
+    falhas_seguidas = 0
     ida = PRIMEIRA_IDA
     while ida <= ULTIMA_IDA:
         volta = ida + timedelta(days=DIAS_NA_VIAGEM)
@@ -355,6 +376,12 @@ def main():
                 achado = buscar(origem, destino, ida, volta)
                 if achado:
                     resultados.append(achado)
+                    falhas_seguidas = 0
+                else:
+                    falhas_seguidas += 1
+                    if falhas_seguidas >= 6 and not resultados:
+                        print("Abortando: 6 buscas seguidas sem resultado. Veja os erros acima.")
+                        raise SystemExit(1)
                 time.sleep(PAUSA_ENTRE_BUSCAS)
         ida += timedelta(days=1)
 
