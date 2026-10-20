@@ -22,9 +22,15 @@ from fast_flights import FlightData, Passengers, get_flights
 # ---------------------------- CONFIGURAÇÃO ----------------------------
 ORIGENS = ["CNF", "GRU"]
 DESTINOS = ["IST", "SAW"]            # Istambul (aeroporto principal e Sabiha Gökçen)
-PRIMEIRA_IDA = date(2027, 1, 8)
-ULTIMA_IDA = date(2027, 1, 15)
-DIAS_NA_VIAGEM = 15                  # volta = ida + 15 dias
+IDA_DE = date(2027, 1, 8)            # primeira data de ida a considerar
+IDA_ATE = date(2027, 1, 31)          # última data de ida (a volta pode cair em fevereiro)
+ESTADIA_MIN = 15                     # dias fora, no mínimo
+ESTADIA_MAX = 20                     # dias fora, no máximo
+# Busca em duas fases, para não fazer centenas de consultas por rodada:
+PASSO_IDA_AMOSTRA = 3                # fase 1: testa uma data de ida a cada 3 dias
+ESTADIAS_AMOSTRA = (15, 17, 20)      # fase 1: e só estas durações de estadia
+MELHORES_PARA_REFINAR = 2            # fase 2: detalha ao redor dos 2 melhores (±1 dia, todas as estadias)
+MAX_BUSCAS = 100                     # limite de consultas por rodada
 ADULTOS = 2
 CRIANCAS = 1                         # criança de 6 anos (faixa de 2 a 11 anos)
 MAX_ESCALAS = 2                      # None = sem filtro
@@ -272,6 +278,7 @@ def buscar(origem, destino, ida, volta):
         "destino": destino,
         "ida": ida.isoformat(),
         "volta": volta.isoformat(),
+        "dias": (volta - ida).days,
         "preco": preco,
         "moeda": detectar_moeda(voo.price),
         "preco_texto": voo.price,
@@ -321,7 +328,7 @@ def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
         "",
         f"🏆 <b>{fmt_preco(melhor['preco'], moeda)}</b>",
         f"📍 {e(nome_aeroporto(melhor['origem']))} → {e(nome_aeroporto(melhor['destino']))}",
-        f"📅 {fmt_data(melhor['ida'])} → {fmt_data(melhor['volta'])} · {DIAS_NA_VIAGEM} dias",
+        f"📅 {fmt_data(melhor['ida'])} → {fmt_data(melhor['volta'])} · {melhor['dias']} dias",
         f"🛫 {e(melhor['companhia'] or '—')}",
         f"⏱ {fmt_escalas(melhor['escalas'])} · {fmt_duracao(melhor['duracao'])}",
     ]
@@ -454,27 +461,73 @@ def diagnostico():
         print(f"(diagnóstico indisponível: {erro})")
 
 
+def datas_de_ida(passo=1):
+    ida = IDA_DE
+    while ida <= IDA_ATE:
+        yield ida
+        ida += timedelta(days=passo)
+
+
 def main():
     diagnostico()
-    resultados = []
-    falhas_seguidas = 0
-    ida = PRIMEIRA_IDA
-    while ida <= ULTIMA_IDA:
-        volta = ida + timedelta(days=DIAS_NA_VIAGEM)
-        for origem in ORIGENS:
-            for destino in DESTINOS:
-                print(f"Buscando {origem}->{destino} {ida} / {volta}")
-                achado = buscar(origem, destino, ida, volta)
-                if achado:
-                    resultados.append(achado)
-                    falhas_seguidas = 0
-                else:
-                    falhas_seguidas += 1
-                    if falhas_seguidas >= 3 and not resultados:
-                        print("Abortando: 3 buscas seguidas sem resultado. Veja os erros acima.")
-                        raise SystemExit(1)
-                time.sleep(PAUSA_ENTRE_BUSCAS)
-        ida += timedelta(days=1)
+    cache = {}            # (origem, destino, ida, volta) -> resultado ou None
+    estado = {"falhas": 0, "buscas": 0}
+
+    def consultar(origem, destino, ida, volta):
+        chave = (origem, destino, ida, volta)
+        if chave in cache:
+            return cache[chave]
+        if estado["buscas"] >= MAX_BUSCAS:
+            return None
+        estado["buscas"] += 1
+        print(f"[{estado['buscas']}/{MAX_BUSCAS}] Buscando {origem}->{destino} {ida} / {volta} ({(volta - ida).days} dias)")
+        achado = buscar(origem, destino, ida, volta)
+        cache[chave] = achado
+        if achado:
+            estado["falhas"] = 0
+        else:
+            estado["falhas"] += 1
+            if estado["falhas"] >= 3 and not any(cache.values()):
+                print("Abortando: 3 buscas seguidas sem resultado. Veja os erros acima.")
+                raise SystemExit(1)
+        time.sleep(PAUSA_ENTRE_BUSCAS)
+        return achado
+
+    # Fase 1: amostra espalhada pelo período (só Istambul principal)
+    print(f"Fase 1: saídas de {IDA_DE} a {IDA_ATE}, estadias {ESTADIAS_AMOSTRA}")
+    for ida in datas_de_ida(PASSO_IDA_AMOSTRA):
+        for estadia in ESTADIAS_AMOSTRA:
+            for origem in ORIGENS:
+                consultar(origem, DESTINOS[0], ida, ida + timedelta(days=estadia))
+
+    # Fase 2: detalha ao redor dos melhores achados
+    fase1 = sorted((r for r in cache.values() if r), key=lambda r: r["preco"])
+    escolhidos, vistos = [], set()
+    for r in fase1:
+        chave = (r["origem"], r["ida"])
+        if chave not in vistos:
+            vistos.add(chave)
+            escolhidos.append(r)
+        if len(escolhidos) >= MELHORES_PARA_REFINAR:
+            break
+    print(f"Fase 2: refinando ao redor de {[(r['origem'], r['ida']) for r in escolhidos]}")
+    for r in escolhidos:
+        ida_base = date.fromisoformat(r["ida"])
+        for delta in (-1, 0, 1):
+            ida = ida_base + timedelta(days=delta)
+            if not (IDA_DE <= ida <= IDA_ATE):
+                continue
+            for estadia in range(ESTADIA_MIN, ESTADIA_MAX + 1):
+                consultar(r["origem"], DESTINOS[0], ida, ida + timedelta(days=estadia))
+
+    # Fase 3: confere os outros aeroportos de destino só nas melhores datas
+    atuais = sorted((r for r in cache.values() if r), key=lambda r: r["preco"])
+    for r in atuais[:MELHORES_PARA_REFINAR]:
+        for destino in DESTINOS[1:]:
+            consultar(r["origem"], destino, date.fromisoformat(r["ida"]), date.fromisoformat(r["volta"]))
+
+    resultados = [r for r in cache.values() if r]
+    print(f"Consultas feitas: {estado['buscas']} · com resultado: {len(resultados)}")
 
     if not resultados:
         print("Nenhum resultado obtido nesta execução.")
