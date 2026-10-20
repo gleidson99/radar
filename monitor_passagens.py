@@ -152,7 +152,7 @@ def buscar(origem, destino, ida, volta):
                 passengers=Passengers(
                     adults=ADULTOS, children=CRIANCAS, infants_in_seat=0, infants_on_lap=0
                 ),
-                fetch_mode="fallback",
+                fetch_mode="local",
             )
             break
         except Exception as erro:  # a lib é não oficial: falhas acontecem
