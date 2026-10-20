@@ -337,38 +337,19 @@ def carregar_milhas():
 
 
 def secao_milhas(melhor, cfg):
-    valor = cfg.get("valor_milheiro")
-    if not valor or melhor["moeda"] != "BRL":
-        return []
+    """Mostra só valores reais em milhas cadastrados em milhas.json (sem estimativas)."""
     e = html.escape
-    teto = melhor["preco"] / valor * 1000
-    linhas = [
-        "",
-        "<b>✨ Milhas</b>",
-        f"🎯 Vale usar milhas se a passagem-prêmio custar menos de ~{fmt_num(teto)} milhas "
-        f"(milheiro a {fmt_preco(valor)}, sem contar taxas)",
-    ]
-    ofertas = []
-    for o in cfg.get("ofertas", []):
-        if not o.get("milhas"):
-            continue
-        equivalente = o["milhas"] / 1000 * valor + o.get("taxas", 0)
-        ofertas.append((equivalente, o))
-    ofertas.sort(key=lambda x: x[0])
-    for equivalente, o in ofertas[:3]:
-        var = (equivalente - melhor["preco"]) / melhor["preco"] * 100
-        if var < 0:
-            comparativo = f"{abs(var):.0f}% mais barato que o dinheiro 👍"
-        else:
-            comparativo = f"{var:.0f}% mais caro que o dinheiro"
+    ofertas = [o for o in cfg.get("ofertas", []) if o.get("milhas")]
+    if not ofertas:
+        return []
+    ofertas.sort(key=lambda o: o["milhas"])
+    linhas = ["", "<b>✨ Milhas (valores consultados)</b>"]
+    for o in ofertas[:5]:
         taxas = f" + {fmt_preco(o['taxas'])}" if o.get("taxas") else ""
         obs = f" · {e(o['obs'])}" if o.get("obs") else ""
         linhas.append(
-            f"💳 {e(o.get('programa', 'Programa'))}: {fmt_num(o['milhas'])} milhas{taxas} "
-            f"≈ {fmt_preco(equivalente)} ({comparativo}){obs}"
+            f"💳 {e(o.get('programa', 'Programa'))}: {fmt_num(o['milhas'])} milhas{taxas}{obs}"
         )
-    if not ofertas:
-        linhas.append("ℹ️ Sem ofertas em milhas cadastradas em milhas.json")
     return linhas
 
 
