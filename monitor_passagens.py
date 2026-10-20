@@ -29,6 +29,7 @@ ADULTOS = 2
 CRIANCAS = 1                         # criança de 6 anos (faixa de 2 a 11 anos)
 MAX_ESCALAS = 2                      # None = sem filtro
 LIMITE_ALERTA = None                 # em R$, ex.: 15000 -> avisa sempre que ficar abaixo disso
+CUSTO_TRECHO_ATE_GRU = 250           # R$ por pessoa, por trecho, de Confins até Guarulhos (ida e volta = 2 trechos)
 QUEDA_MINIMA_PCT = 5                 # avisa se cair 5% ou mais vs. última execução
 PAUSA_ENTRE_BUSCAS = 3               # segundos, para não sobrecarregar o Google
 HISTORICO = Path(__file__).with_name("historico.json")
@@ -273,6 +274,18 @@ def converter_para_reais(resultados):
             r["cotacao"] = None  # sem cotação: mantém na moeda original
 
 
+def aplicar_custo_ate_gru(resultados):
+    """Soma o deslocamento CNF<->GRU (por pessoa) às opções que saem de Guarulhos,
+    para comparar com as que saem direto de Confins em pé de igualdade."""
+    extra = CUSTO_TRECHO_ATE_GRU * 2
+    for r in resultados:
+        r["ajuste"] = 0
+        if r["origem"] == "GRU" and r["moeda"] == "BRL" and extra:
+            r["preco_google"] = r["preco"]
+            r["preco"] += extra
+            r["ajuste"] = extra
+
+
 # ------------------------------ TELEGRAM -------------------------------
 def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
     melhor = resultados[0]
@@ -289,6 +302,11 @@ def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
         f"🛫 {e(melhor['companhia'] or '—')}",
         f"⏱ {fmt_escalas(melhor['escalas'])} · {fmt_duracao(melhor['duracao'])}",
     ]
+    if melhor.get("ajuste"):
+        linhas.append(
+            f"🚌 Inclui {fmt_preco(melhor['ajuste'])} por pessoa do trecho CNF↔GRU "
+            f"(Google: {fmt_preco(melhor['preco_google'])})"
+        )
 
     tendencia = []
     if ultimo:
@@ -310,7 +328,7 @@ def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
         linhas += ["", "<b>Outras boas opções</b>"]
         for i, r in enumerate(resultados[1:5], 1):
             linhas.append(
-                f"{MEDALHAS[i]} <b>{fmt_preco(r['preco'], r['moeda'])}</b> · "
+                f"{MEDALHAS[i]} <b>{fmt_preco(r['preco'], r['moeda'])}</b>{' ✚' if r.get('ajuste') else ''} · "
                 f"{r['origem']}→{r['destino']} · {fmt_data(r['ida'])}–{fmt_data(r['volta'])} · "
                 f"{fmt_escalas(r['escalas'], curto=True)} · {fmt_duracao(r['duracao'])}"
             )
@@ -322,6 +340,8 @@ def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
         simbolo = SIMBOLOS.get(melhor["moeda_original"], melhor["moeda_original"])
         taxa = f"{melhor['cotacao']:.2f}".replace(".", ",")
         linhas.append(f"💱 Convertido de {simbolo} a R$ {taxa} (valor aproximado)")
+    if any(r.get("ajuste") for r in resultados[:5]):
+        linhas.append("✚ inclui o deslocamento CNF↔GRU por pessoa, ida e volta")
     linhas.append("<i>Valores ida e volta, como exibidos no Google Flights. Reconfirme antes de comprar.</i>")
     return "\n".join(linhas)
 
@@ -436,6 +456,7 @@ def main():
         return
 
     converter_para_reais(resultados)
+    aplicar_custo_ate_gru(resultados)
     resultados.sort(key=lambda r: r["preco"])
     melhor = resultados[0]
 
