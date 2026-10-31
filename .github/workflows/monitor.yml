@@ -1,7 +1,8 @@
 name: Monitor de passagens
 
 on:
-  # agendamento desativado: o Google não atende o servidor do GitHub; rode localmente (ver README)
+  schedule:
+    - cron: "17 11 * * *"    # todo dia às 08:17 (Brasília); plano grátis do SerpApi = 250 buscas/mês
   workflow_dispatch:         # permite rodar manualmente pelo botão "Run workflow"
 
 permissions:
@@ -14,27 +15,23 @@ concurrency:
 jobs:
   buscar:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
 
-      - name: Instalar dependências
-        run: |
-          pip install -r requirements.txt
-          playwright install --with-deps chromium
-
-      - name: Buscar preços
+      - name: Buscar preços (SerpApi)
         run: python monitor_passagens.py
         env:
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
       - name: Salvar histórico
+        if: always()
         run: |
           git config user.name "monitor-bot"
           git config user.email "monitor-bot@users.noreply.github.com"

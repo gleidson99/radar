@@ -1,17 +1,22 @@
 # Radar de passagens (CNF/GRU → Tbilisi)
 
-Monitor em Python que consulta o Google Flights **no seu PC Windows** a cada hora e avisa no Telegram.
+Monitor em Python que consulta preços do Google Flights e avisa no Telegram.
 
-- **Toda hora:** reconfere as 5 melhores combinações de datas.
-- **1x por dia:** varredura completa (08–31/jan, estadia de 15 a 20 dias, CNF e GRU) + resumo.
-- Alerta quando há novo menor preço ou queda de 5%+. Se ficar 3 execuções sem conseguir consultar, avisa também.
+## Modo GitHub (recomendado): API do SerpApi
+O Google bloqueia acesso automatizado, então no GitHub o monitor usa o **SerpApi**, que entrega os resultados do Google Flights por API. O plano grátis dá **250 buscas por mês**.
 
-## Instalação (Windows)
-1. Instale o Python (python.org) marcando **Add Python to PATH**, e o Google Chrome.
-2. Baixe este repositório (Code → Download ZIP) e extraia numa pasta.
-3. No Prompt de Comando, dentro da pasta: `pip install -r requirements.txt`
-4. Copie `segredos.exemplo.txt` para `segredos.txt` e preencha o token do bot (o arquivo fica só no seu PC).
-5. Dê dois cliques em `teste_windows.bat` (abre o Chrome, faz poucas buscas e manda uma mensagem de teste).
-6. Se o teste funcionou, dê dois cliques em `instalar_tarefa.bat`. Para parar: `remover_tarefa.bat`.
+- Roda **1x por dia** (08:17, horário de Brasília), com **8 buscas** por dia (~240/mês).
+- Em cada execução, reconfere as 2 combinações mais baratas já encontradas e testa 6 novas de um rodízio
+  (saídas de 08 a 31/jan, estadias de 15, 17 e 20 dias, saindo de CNF e de GRU). O rodízio cobre tudo em cerca de 3 semanas.
+- Manda um resumo diário no Telegram e destaca novo menor preço ou queda de 5% ou mais.
 
-Logs em `log_monitor.txt`. O GitHub Actions ficou só como execução manual (o Google não atende os servidores do GitHub).
+### Configuração
+1. Crie uma conta grátis em serpapi.com e copie a sua **API Key** (menu "Api Key").
+2. No GitHub: Settings → Secrets and variables → Actions → New repository secret:
+   `SERPAPI_KEY` = sua chave. (`TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` continuam como estão.)
+3. Em Actions → Monitor de passagens → Run workflow, rode uma vez para testar.
+
+Ajustes no início de `monitor_passagens.py` (datas, estadias, passageiros) e `BUSCAS_SERPAPI` (buscas por execução).
+
+## Modo local (Windows) — não funciona mais
+O Google passou a recusar o Chrome automatizado. Os scripts `.bat` ficam só como referência.

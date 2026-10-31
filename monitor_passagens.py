@@ -18,7 +18,10 @@ import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from fast_flights import FlightData, Passengers, get_flights
+try:  # só é necessária no modo local (Google Flights pelo Chrome)
+    from fast_flights import FlightData, Passengers, get_flights
+except ImportError:
+    FlightData = Passengers = get_flights = None
 
 # ---------------------------- CONFIGURAÇÃO ----------------------------
 ORIGENS = ["CNF", "GRU"]
@@ -45,6 +48,9 @@ ESTADO = PASTA / "estado.json"
 VER_JANELA = os.getenv("VER_JANELA") == "1"   # 1 = mostra a janela do Chrome (para testes)
 MODO_TESTE = os.getenv("TESTE") == "1"          # 1 = não grava histórico (teste de instalação)
 MILHAS = Path(__file__).with_name("milhas.json")
+SERPAPI_KEY = os.getenv("SERPAPI_KEY", "").strip()   # com chave: usa a API do SerpApi (funciona no GitHub)
+BUSCAS_SERPAPI = int(os.getenv("BUSCAS_SERPAPI", "8"))  # por execução; plano grátis = 250/mês
+ESTADIAS_SERPAPI = (15, 17, 20)      # estadias testadas no rodízio do SerpApi
 
 AEROPORTOS = {
     "CNF": "Confins",
@@ -317,7 +323,80 @@ def _variantes():
     return [alternativa] if _CRIANCA_COMO_ADULTO else [base, alternativa]
 
 
+def buscar_serpapi(origem, destino, ida, volta):
+    """Consulta o Google Flights pela API do SerpApi. Retorna a opção mais barata ou None."""
+    params = {
+        "engine": "google_flights",
+        "departure_id": origem,
+        "arrival_id": destino,
+        "outbound_date": ida.isoformat(),
+        "return_date": volta.isoformat(),
+        "type": "1",                      # ida e volta
+        "travel_class": "1",              # econômica
+        "adults": ADULTOS,
+        "children": CRIANCAS,
+        "currency": "BRL",
+        "hl": "pt",
+        "gl": "br",
+        "api_key": SERPAPI_KEY,
+    }
+    if MAX_ESCALAS is not None:
+        params["stops"] = {0: 1, 1: 2, 2: 3}.get(MAX_ESCALAS, 0)
+    url = "https://serpapi.com/search.json?" + urllib.parse.urlencode(params)
+    try:
+        with urllib.request.urlopen(url, timeout=90) as resp:
+            dados = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as erro:
+        corpo = erro.read().decode("utf-8", "replace")[:300]
+        print(f"  ! SerpApi {origem}->{destino} {ida}: HTTP {erro.code} {corpo}")
+        if erro.code in (401, 429):
+            print("  ! Chave inválida ou cota do mês esgotada.")
+        return None
+    except Exception as erro:
+        print(f"  ! SerpApi {origem}->{destino} {ida}: {erro}")
+        return None
+    if dados.get("error"):
+        print(f"  ! SerpApi {origem}->{destino} {ida}: {dados['error']}")
+        return None
+
+    opcoes = [o for o in dados.get("best_flights", []) + dados.get("other_flights", []) if o.get("price")]
+    if not opcoes:
+        print(f"  ! {origem}->{destino} {ida}: nenhuma opção com preço")
+        return None
+    o = min(opcoes, key=lambda x: x["price"])
+    trechos = o.get("flights", [])
+    cias = []
+    for t in trechos:
+        if t.get("airline") and t["airline"] not in cias:
+            cias.append(t["airline"])
+    minutos = o.get("total_duration") or 0
+    link = dados.get("search_metadata", {}).get("google_flights_url") or link_busca(origem, destino, ida, volta)
+    return {
+        "origem": origem,
+        "destino": destino,
+        "ida": ida.isoformat(),
+        "volta": volta.isoformat(),
+        "dias": (volta - ida).days,
+        "preco": int(o["price"]),
+        "moeda": "BRL",
+        "preco_texto": f"R$ {o['price']}",
+        "companhia": ", ".join(cias) or "—",
+        "escalas": max(len(trechos) - 1, 0),
+        "duracao": f"{minutos // 60} hr {minutos % 60} min" if minutos else "",
+        "link": link,
+        "crianca_como_adulto": False,
+        "faixa_tipica": (dados.get("price_insights") or {}).get("typical_price_range"),
+    }
+
+
 def buscar(origem, destino, ida, volta):
+    """Usa o SerpApi se houver chave; senão, o Google Flights pelo navegador local."""
+    if SERPAPI_KEY:
+        return buscar_serpapi(origem, destino, ida, volta)
+    return buscar_navegador(origem, destino, ida, volta)
+
+
+def buscar_navegador(origem, destino, ida, volta):
     """Retorna a opção mais barata para a combinação, ou None."""
     global _CRIANCA_COMO_ADULTO
     resultado = None
@@ -406,7 +485,7 @@ def converter_para_reais(resultados):
 def aplicar_custo_ate_gru(resultados):
     """Soma o deslocamento CNF<->GRU (por pessoa) às opções que saem de Guarulhos,
     para comparar com as que saem direto de Confins em pé de igualdade."""
-    extra = CUSTO_TRECHO_ATE_GRU * 2
+    extra = CUSTO_TRECHO_ATE_GRU * 2 * (ADULTOS + CRIANCAS)  # o Google mostra o total da família
     for r in resultados:
         r["ajuste"] = 0
         if r["origem"] == "GRU" and r["moeda"] == "BRL" and extra:
@@ -433,7 +512,7 @@ def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
     ]
     if melhor.get("ajuste"):
         linhas.append(
-            f"🚌 Inclui {fmt_preco(melhor['ajuste'])} por pessoa do trecho CNF↔GRU "
+            f"🚌 Inclui {fmt_preco(melhor['ajuste'])} de CNF↔GRU ida e volta para os 3 "
             f"(Google: {fmt_preco(melhor['preco_google'])})"
         )
 
@@ -472,7 +551,7 @@ def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
     if melhor.get("crianca_como_adulto"):
         linhas.append("👶 Preço calculado com 3 adultos; a criança de 6 anos costuma pagar um pouco menos")
     if any(r.get("ajuste") for r in resultados[:5]):
-        linhas.append("✚ inclui o deslocamento CNF↔GRU por pessoa, ida e volta")
+        linhas.append("✚ inclui o deslocamento CNF↔GRU (ida e volta, toda a família)")
     linhas.append("<i>Valores ida e volta, como exibidos no Google Flights. Reconfirme antes de comprar.</i>")
     return "\n".join(linhas)
 
@@ -585,13 +664,17 @@ def escolher_modo(historico):
 
 
 def main():
-    diagnostico()
+    if not SERPAPI_KEY and get_flights is None:
+        print("Sem SERPAPI_KEY e sem a biblioteca fast-flights: cadastre o segredo SERPAPI_KEY no GitHub.")
+        raise SystemExit(1)
+    if not SERPAPI_KEY:
+        diagnostico()
     historico = carregar_historico()
     # ignora execuções antigas de outros destinos
     historico["execucoes"] = [
         e for e in historico["execucoes"] if e.get("melhor", {}).get("destino") in DESTINOS
     ]
-    modo = escolher_modo(historico)
+    modo = "api" if SERPAPI_KEY else escolher_modo(historico)
     candidatos = []
     if modo == "rapido":
         for r in historico["execucoes"][-1].get("top5", []):
@@ -609,7 +692,7 @@ def main():
         chave = (origem, destino, ida, volta)
         if chave in cache:
             return cache[chave]
-        if cont["buscas"] >= MAX_BUSCAS:
+        if cont["buscas"] >= (BUSCAS_SERPAPI if SERPAPI_KEY else MAX_BUSCAS):
             return None
         cont["buscas"] += 1
         print(f"[{cont['buscas']}] Buscando {origem}->{destino} {ida} / {volta} ({(volta - ida).days} dias)")
@@ -623,10 +706,40 @@ def main():
                 print("Abortando: 3 buscas seguidas sem resultado. Veja os erros acima.")
                 registrar_falha("O Google Flights não devolveu preços.")
                 raise SystemExit(1)
-        time.sleep(PAUSA_ENTRE_BUSCAS)
+        time.sleep(0 if SERPAPI_KEY else PAUSA_ENTRE_BUSCAS)
         return achado
 
-    if modo == "rapido":
+    if modo == "api":
+        # Plano grátis do SerpApi: poucas buscas por dia. Reconfere os 2 melhores já achados
+        # e testa as próximas combinações de um rodízio que percorre todo o período.
+        grade = [
+            (origem, DESTINOS[0], ida, ida + timedelta(days=estadia))
+            for ida in datas_de_ida(1)
+            for estadia in ESTADIAS_SERPAPI
+            for origem in ORIGENS
+        ]
+        pos = historico.get("rodizio", 0) % len(grade)
+        melhores = []
+        if historico["execucoes"]:
+            todos = {}
+            for e in historico["execucoes"][-30:]:
+                for r in e.get("top5", []):
+                    chave = (r["origem"], r["destino"], r["ida"], r["volta"])
+                    todos[chave] = min(todos.get(chave, 10**9), r.get("preco_google", r["preco"]))
+            for (o, d, i, v), _ in sorted(todos.items(), key=lambda x: x[1])[:2]:
+                melhores.append((o, d, date.fromisoformat(i), date.fromisoformat(v)))
+        print(f"SerpApi: reconferindo {len(melhores)} melhores + rodízio a partir da posição {pos}/{len(grade)}")
+        MAX = BUSCAS_SERPAPI
+        for c in melhores:
+            if cont["buscas"] < MAX:
+                consultar(*c)
+        while cont["buscas"] < MAX and pos < len(grade) * 2:
+            consultar(*grade[pos % len(grade)])
+            pos += 1
+            if pos - historico.get("rodizio", 0) >= len(grade):
+                break
+        historico["rodizio"] = pos % len(grade)
+    elif modo == "rapido":
         print(f"Reconferindo {len(candidatos)} melhores combinações da última varredura")
         for c in candidatos:
             consultar(*c)
@@ -699,8 +812,8 @@ def main():
     if ultimo and melhor["preco"] <= ultimo * (1 - QUEDA_MINIMA_PCT / 100):
         queda = (1 - melhor["preco"] / ultimo) * 100
         motivos.append(f"Queda de {queda:.0f}% desde a última consulta")
-    if modo == "completo" and not motivos:
-        motivos.append("Resumo diário (varredura completa)")
+    if modo in ("completo", "api") and not motivos:
+        motivos.append("Resumo diário")
 
     if not MODO_TESTE:
         historico["execucoes"].append(
