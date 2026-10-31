@@ -2,12 +2,12 @@ name: Monitor de passagens
 
 on:
   schedule:
-    - cron: "17 11 * * *"    # todo dia às 08:17 (Brasília); plano grátis do SerpApi = 250 buscas/mês
+    - cron: "17 2,8,14,20 * * *"   # a cada 6 horas (23:17, 05:17, 11:17, 17:17 em Brasília), 2 buscas cada
   workflow_dispatch:         # permite rodar manualmente pelo botão "Run workflow"
     inputs:
       origens:
-        description: "Origens (CNF,GRU = monitor normal; outra opção = teste que não grava histórico)"
-        default: "CNF,GRU"
+        description: "Origens (CNF = monitor normal; outra opção, ex. GRU = teste que não grava histórico)"
+        default: "CNF"
         required: false
 
 permissions:
@@ -32,7 +32,7 @@ jobs:
         run: python monitor_passagens.py
         env:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
-          ORIGENS: ${{ github.event.inputs.origens || 'CNF,GRU' }}
+          ORIGENS: ${{ github.event.inputs.origens || 'CNF' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}

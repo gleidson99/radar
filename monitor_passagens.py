@@ -24,12 +24,12 @@ except ImportError:
     FlightData = Passengers = get_flights = None
 
 # ---------------------------- CONFIGURAÇÃO ----------------------------
-ORIGENS = [o.strip().upper() for o in os.getenv("ORIGENS", "CNF,GRU").split(",") if o.strip()]
+ORIGENS = [o.strip().upper() for o in os.getenv("ORIGENS", "CNF").split(",") if o.strip()]
 DESTINOS = ["TBS", "IST", "SAW"]     # Tbilisi (Geórgia) e os 2 aeroportos de Istambul
-IDA_DE = date(2027, 1, 8)            # primeira data de ida a considerar
-IDA_ATE = date(2027, 1, 31)          # última data de ida (a volta pode cair em fevereiro)
+IDA_DE = date(2027, 1, 1)            # primeira data de ida a considerar
+IDA_ATE = date(2027, 1, 15)          # última data de ida (primeira quinzena de janeiro)
 ESTADIA_MIN = 15                     # dias fora, no mínimo
-ESTADIA_MAX = 20                     # dias fora, no máximo
+ESTADIA_MAX = 25                     # dias fora, no máximo
 # Busca em duas fases, para não fazer centenas de consultas por rodada:
 PASSO_IDA_AMOSTRA = 3                # fase 1: testa uma data de ida a cada 3 dias
 ESTADIAS_AMOSTRA = (15, 17, 20)      # fase 1: e só estas durações de estadia
@@ -46,11 +46,12 @@ PASTA = Path(__file__).resolve().parent
 HISTORICO = PASTA / "historico.json"
 ESTADO = PASTA / "estado.json"
 VER_JANELA = os.getenv("VER_JANELA") == "1"   # 1 = mostra a janela do Chrome (para testes)
-MODO_TESTE = os.getenv("TESTE") == "1" or os.getenv("ORIGENS", "CNF,GRU").replace(" ", "").upper() not in ("CNF,GRU", "GRU,CNF")          # 1 = não grava histórico (teste de instalação)
+MODO_TESTE = os.getenv("TESTE") == "1" or os.getenv("ORIGENS", "CNF").replace(" ", "").upper() != "CNF"          # 1 = não grava histórico (teste de instalação)
 MILHAS = Path(__file__).with_name("milhas.json")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY", "").strip()   # com chave: usa a API do SerpApi (funciona no GitHub)
-BUSCAS_SERPAPI = int(os.getenv("BUSCAS_SERPAPI", "8"))  # por execução; plano grátis = 250/mês
-ESTADIAS_SERPAPI = (15, 17, 20)      # estadias testadas no rodízio do SerpApi
+BUSCAS_SERPAPI = int(os.getenv("BUSCAS_SERPAPI", "2"))  # por execução (4 execuções/dia x 2 = ~248/mês; plano grátis = 250)
+ESTADIAS_SERPAPI = (15, 17, 19, 21, 23, 25)  # estadias testadas no rodízio do SerpApi
+VALIDADE_PRECO_DIAS = 20             # preço sem reconferir há mais que isso sai da lista
 
 AEROPORTOS = {
     "CNF": "Confins",
@@ -792,9 +793,15 @@ def main():
             for r in e.get("top5", []):
                 chave = (r["ida"], r["volta"])
                 todos[chave] = min(todos.get(chave, 10**9), r.get("preco_google", r["preco"]))
+        for r in historico.get("precos", {}).values():
+            chave = (r["ida"], r["volta"])
+            todos[chave] = min(todos.get(chave, 10**9), r.get("preco_google", r["preco"]))
+        n_exec = historico.get("contador", 0)
+        historico["contador"] = n_exec + 1
+        reconferir = 1 if n_exec % 4 == 0 else 0   # 1x por dia reconfere a melhor data; nas outras, só rodízio
         melhores = [
             (date.fromisoformat(i), date.fromisoformat(v))
-            for (i, v), _ in sorted(todos.items(), key=lambda x: x[1])[:2]
+            for (i, v), _ in sorted(todos.items(), key=lambda x: x[1])[:reconferir]
         ]
         print(f"SerpApi: reconferindo {len(melhores)} melhores datas + rodízio a partir de {pos}/{len(grade)}")
         for ida, volta in melhores:
@@ -859,6 +866,22 @@ def main():
 
     converter_para_reais(resultados)
     aplicar_custo_ate_gru(resultados)
+    agora = datetime.now(timezone.utc)
+    if modo == "api" and not MODO_TESTE:
+        # junta com os preços já conhecidos das outras datas (cada execução só consulta 2 datas)
+        precos = historico.get("precos", {})
+        for r in resultados:
+            r["visto"] = agora.isoformat(timespec="minutes")
+            precos[f"{r['origem']}|{r['destino']}|{r['ida']}|{r['volta']}"] = r
+        limite = agora - timedelta(days=VALIDADE_PRECO_DIAS)
+        precos = {
+            k: v for k, v in precos.items()
+            if v["origem"] in ORIGENS and v["destino"] in DESTINOS
+            and IDA_DE.isoformat() <= v["ida"] <= IDA_ATE.isoformat()
+            and datetime.fromisoformat(v.get("visto", "2000-01-01T00:00+00:00")) >= limite
+        }
+        historico["precos"] = precos
+        resultados = list(precos.values())
     resultados.sort(key=lambda r: r["preco"])
     melhor = resultados[0]
 
@@ -883,8 +906,10 @@ def main():
     if not MODO_TESTE and ultimo and melhor["preco"] <= ultimo * (1 - QUEDA_MINIMA_PCT / 100):
         queda = (1 - melhor["preco"] / ultimo) * 100
         motivos.append(f"Queda de {queda:.0f}% desde a última consulta")
-    if modo in ("completo", "api") and not motivos:
+    if modo == "completo" and not motivos:
         motivos.append("Resumo diário")
+    if modo == "api" and not motivos and historico.get("contador", 0) % 4 == 1:
+        motivos.append("Resumo diário")   # 1 resumo por dia; nas outras execuções só avisa se cair
 
     if not MODO_TESTE:
         historico["execucoes"].append(
