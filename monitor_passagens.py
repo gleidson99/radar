@@ -28,8 +28,8 @@ ORIGENS = [o.strip().upper() for o in os.getenv("ORIGENS", "CNF").split(",") if 
 DESTINOS = ["TBS", "IST", "SAW"]     # Tbilisi (Geórgia) e os 2 aeroportos de Istambul
 IDA_DE = date(2027, 1, 1)            # primeira data de ida a considerar
 IDA_ATE = date(2027, 1, 15)          # última data de ida (primeira quinzena de janeiro)
-ESTADIA_MIN = 15                     # dias fora, no mínimo
-ESTADIA_MAX = 25                     # dias fora, no máximo
+ESTADIA_MIN = 19                     # dias fora, no mínimo
+ESTADIA_MAX = 24                     # dias fora, no máximo
 # Busca em duas fases, para não fazer centenas de consultas por rodada:
 PASSO_IDA_AMOSTRA = 3                # fase 1: testa uma data de ida a cada 3 dias
 ESTADIAS_AMOSTRA = (15, 17, 20)      # fase 1: e só estas durações de estadia
@@ -50,7 +50,7 @@ MODO_TESTE = os.getenv("TESTE") == "1" or os.getenv("ORIGENS", "CNF").replace(" 
 MILHAS = Path(__file__).with_name("milhas.json")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY", "").strip()   # com chave: usa a API do SerpApi (funciona no GitHub)
 BUSCAS_SERPAPI = int(os.getenv("BUSCAS_SERPAPI", "2"))  # por execução (4 execuções/dia x 2 = ~248/mês; plano grátis = 250)
-ESTADIAS_SERPAPI = (15, 17, 19, 21, 23, 25)  # estadias testadas no rodízio do SerpApi
+ESTADIAS_SERPAPI = (19, 20, 21, 22, 23, 24)  # estadias testadas no rodízio do SerpApi
 VALIDADE_PRECO_DIAS = 20             # preço sem reconferir há mais que isso sai da lista
 
 AEROPORTOS = {
