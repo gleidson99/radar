@@ -813,9 +813,9 @@ def main():
         motivos.append("Primeira consulta: este é o preço de referência")
     if LIMITE_ALERTA is not None and melhor["moeda"] == "BRL" and melhor["preco"] <= LIMITE_ALERTA:
         motivos.append(f"Abaixo do seu limite de {fmt_preco(LIMITE_ALERTA)}")
-    if minimo is not None and melhor["preco"] < minimo:
+    if not MODO_TESTE and minimo is not None and melhor["preco"] < minimo:
         motivos.append("Novo menor preço já registrado")
-    if ultimo and melhor["preco"] <= ultimo * (1 - QUEDA_MINIMA_PCT / 100):
+    if not MODO_TESTE and ultimo and melhor["preco"] <= ultimo * (1 - QUEDA_MINIMA_PCT / 100):
         queda = (1 - melhor["preco"] / ultimo) * 100
         motivos.append(f"Queda de {queda:.0f}% desde a última consulta")
     if modo in ("completo", "api") and not motivos:
