@@ -49,7 +49,7 @@ VER_JANELA = os.getenv("VER_JANELA") == "1"   # 1 = mostra a janela do Chrome (p
 MODO_TESTE = os.getenv("TESTE") == "1" or os.getenv("ORIGENS", "CNF").replace(" ", "").upper() != "CNF"          # 1 = não grava histórico (teste de instalação)
 MILHAS = Path(__file__).with_name("milhas.json")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY", "").strip()   # com chave: usa a API do SerpApi (funciona no GitHub)
-BUSCAS_SERPAPI = int(os.getenv("BUSCAS_SERPAPI", "2"))  # por execução (4 execuções/dia x 2 = ~248/mês; plano grátis = 250)
+BUSCAS_SERPAPI = int(os.getenv("BUSCAS_SERPAPI", "2"))  # por execução (3 execuções/dia x 2 = ~186/mês; plano grátis = 250)
 ESTADIAS_SERPAPI = (19, 20, 21, 22, 23, 24)  # estadias testadas no rodízio do SerpApi
 VALIDADE_PRECO_DIAS = 20             # preço sem reconferir há mais que isso sai da lista
 
@@ -798,7 +798,7 @@ def main():
             todos[chave] = min(todos.get(chave, 10**9), r.get("preco_google", r["preco"]))
         n_exec = historico.get("contador", 0)
         historico["contador"] = n_exec + 1
-        reconferir = 1 if n_exec % 4 == 0 else 0   # 1x por dia reconfere a melhor data; nas outras, só rodízio
+        reconferir = 1 if n_exec % 3 == 0 else 0   # 1x por dia reconfere a melhor data; nas outras, só rodízio
         melhores = [
             (date.fromisoformat(i), date.fromisoformat(v))
             for (i, v), _ in sorted(todos.items(), key=lambda x: x[1])[:reconferir]
@@ -908,7 +908,7 @@ def main():
         motivos.append(f"Queda de {queda:.0f}% desde a última consulta")
     if modo == "completo" and not motivos:
         motivos.append("Resumo diário")
-    if modo == "api" and not motivos and historico.get("contador", 0) % 4 == 1:
+    if modo == "api" and not motivos and historico.get("contador", 0) % 3 == 1:
         motivos.append("Resumo diário")   # 1 resumo por dia; nas outras execuções só avisa se cair
 
     if not MODO_TESTE:

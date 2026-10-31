@@ -2,7 +2,7 @@ name: Monitor de passagens
 
 on:
   schedule:
-    - cron: "17 2,8,14,20 * * *"   # a cada 6 horas (23:17, 05:17, 11:17, 17:17 em Brasília), 2 buscas cada
+    - cron: "0 1,9,17 * * *"   # 3x por dia: 22:00, 06:00 e 14:00 (Brasília), 2 buscas cada
   workflow_dispatch:         # permite rodar manualmente pelo botão "Run workflow"
     inputs:
       origens:
