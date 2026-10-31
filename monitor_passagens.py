@@ -24,7 +24,7 @@ except ImportError:
     FlightData = Passengers = get_flights = None
 
 # ---------------------------- CONFIGURAÇÃO ----------------------------
-ORIGENS = ["CNF", "GRU"]
+ORIGENS = [o.strip().upper() for o in os.getenv("ORIGENS", "CNF,GRU").split(",") if o.strip()]
 DESTINOS = ["TBS"]                   # Tbilisi, Geórgia
 IDA_DE = date(2027, 1, 8)            # primeira data de ida a considerar
 IDA_ATE = date(2027, 1, 31)          # última data de ida (a volta pode cair em fevereiro)
@@ -46,7 +46,7 @@ PASTA = Path(__file__).resolve().parent
 HISTORICO = PASTA / "historico.json"
 ESTADO = PASTA / "estado.json"
 VER_JANELA = os.getenv("VER_JANELA") == "1"   # 1 = mostra a janela do Chrome (para testes)
-MODO_TESTE = os.getenv("TESTE") == "1"          # 1 = não grava histórico (teste de instalação)
+MODO_TESTE = os.getenv("TESTE") == "1" or os.getenv("ORIGENS", "CNF,GRU").replace(" ", "").upper() not in ("CNF,GRU", "GRU,CNF")          # 1 = não grava histórico (teste de instalação)
 MILHAS = Path(__file__).with_name("milhas.json")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY", "").strip()   # com chave: usa a API do SerpApi (funciona no GitHub)
 BUSCAS_SERPAPI = int(os.getenv("BUSCAS_SERPAPI", "8"))  # por execução; plano grátis = 250/mês
@@ -709,7 +709,13 @@ def main():
         time.sleep(0 if SERPAPI_KEY else PAUSA_ENTRE_BUSCAS)
         return achado
 
-    if modo == "api":
+    if modo == "api" and MODO_TESTE:
+        # teste: amostra espalhada pelo período, estadia de 17 dias
+        print(f"SerpApi (teste): origens {ORIGENS}")
+        for ida in datas_de_ida(3):
+            for origem in ORIGENS:
+                consultar(origem, DESTINOS[0], ida, ida + timedelta(days=17))
+    elif modo == "api":
         # Plano grátis do SerpApi: poucas buscas por dia. Reconfere os 2 melhores já achados
         # e testa as próximas combinações de um rodízio que percorre todo o período.
         grade = [
@@ -802,7 +808,7 @@ def main():
 
     motivos = []
     if MODO_TESTE:
-        motivos.append("🧪 Teste de instalação: o monitor está funcionando")
+        motivos.append(f"🧪 Teste saindo de {', '.join(ORIGENS)} (amostra de datas, não entra no histórico)")
     if not anteriores and not MODO_TESTE:
         motivos.append("Primeira consulta: este é o preço de referência")
     if LIMITE_ALERTA is not None and melhor["moeda"] == "BRL" and melhor["preco"] <= LIMITE_ALERTA:

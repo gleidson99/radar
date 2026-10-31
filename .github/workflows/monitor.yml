@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "17 11 * * *"    # todo dia às 08:17 (Brasília); plano grátis do SerpApi = 250 buscas/mês
   workflow_dispatch:         # permite rodar manualmente pelo botão "Run workflow"
+    inputs:
+      origens:
+        description: "Origens (CNF,GRU = monitor normal; outra opção = teste que não grava histórico)"
+        default: "CNF,GRU"
+        required: false
 
 permissions:
   contents: write            # necessário para salvar o historico.json
@@ -27,6 +32,7 @@ jobs:
         run: python monitor_passagens.py
         env:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+          ORIGENS: ${{ github.event.inputs.origens || 'CNF,GRU' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
