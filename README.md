@@ -1,4 +1,4 @@
-# Radar de passagens (CNF/GRU → Tbilisi)
+# Radar de passagens (CNF/GRU → Tbilisi e Istambul)
 
 Monitor em Python que consulta preços do Google Flights e avisa no Telegram.
 
@@ -7,7 +7,7 @@ O Google bloqueia acesso automatizado, então no GitHub o monitor usa o **SerpAp
 
 - Roda **1x por dia** (08:17, horário de Brasília), com **8 buscas** por dia (~240/mês).
 - Em cada execução, reconfere as 2 combinações mais baratas já encontradas e testa 6 novas de um rodízio
-  (saídas de 08 a 31/jan, estadias de 15, 17 e 20 dias, saindo de CNF e de GRU). O rodízio cobre tudo em cerca de 3 semanas.
+  (saídas de 08 a 31/jan, estadias de 15, 17 e 20 dias). Cada busca cobre CNF e GRU → Tbilisi (TBS) e Istambul (IST e SAW) de uma vez. O rodízio cobre todas as 72 combinações de datas em cerca de 12 dias.
 - Manda um resumo diário no Telegram e destaca novo menor preço ou queda de 5% ou mais.
 
 ### Configuração

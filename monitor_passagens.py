@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Monitor de passagens CNF/GRU -> Tbilisi, Geórgia (ida e volta, 15 a 20 dias).
+"""Monitor de passagens CNF/GRU -> Tbilisi (Geórgia) e Istambul (Turquia) (ida e volta, 15 a 20 dias).
 
 Consulta o Google Flights (via biblioteca não oficial fast-flights), converte os
 preços para reais, guarda o histórico em historico.json e avisa pelo Telegram
@@ -25,7 +25,7 @@ except ImportError:
 
 # ---------------------------- CONFIGURAÇÃO ----------------------------
 ORIGENS = [o.strip().upper() for o in os.getenv("ORIGENS", "CNF,GRU").split(",") if o.strip()]
-DESTINOS = ["TBS"]                   # Tbilisi, Geórgia
+DESTINOS = ["TBS", "IST", "SAW"]     # Tbilisi (Geórgia) e os 2 aeroportos de Istambul
 IDA_DE = date(2027, 1, 8)            # primeira data de ida a considerar
 IDA_ATE = date(2027, 1, 31)          # última data de ida (a volta pode cair em fevereiro)
 ESTADIA_MIN = 15                     # dias fora, no mínimo
@@ -59,6 +59,7 @@ AEROPORTOS = {
     "SAW": "Istambul (Sabiha Gökçen)",
     "TBS": "Tbilisi",
 }
+CIDADES = {"TBS": "Tbilisi", "IST": "Istambul", "SAW": "Istambul"}
 SIMBOLOS = {"BRL": "R$", "USD": "US$", "EUR": "€"}
 MEDALHAS = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
 # -----------------------------------------------------------------------
@@ -360,33 +361,48 @@ def buscar_serpapi(origem, destino, ida, volta):
         return None
 
     opcoes = [o for o in dados.get("best_flights", []) + dados.get("other_flights", []) if o.get("price")]
-    if not opcoes:
-        print(f"  ! {origem}->{destino} {ida}: nenhuma opção com preço")
-        return None
-    o = min(opcoes, key=lambda x: x["price"])
-    trechos = o.get("flights", [])
-    cias = []
-    for t in trechos:
-        if t.get("airline") and t["airline"] not in cias:
-            cias.append(t["airline"])
-    minutos = o.get("total_duration") or 0
     link = dados.get("search_metadata", {}).get("google_flights_url") or link_busca(origem, destino, ida, volta)
-    return {
-        "origem": origem,
-        "destino": destino,
-        "ida": ida.isoformat(),
-        "volta": volta.isoformat(),
-        "dias": (volta - ida).days,
-        "preco": int(o["price"]),
-        "moeda": "BRL",
-        "preco_texto": f"R$ {o['price']}",
-        "companhia": ", ".join(cias) or "—",
-        "escalas": max(len(trechos) - 1, 0),
-        "duracao": f"{minutos // 60} hr {minutos % 60} min" if minutos else "",
-        "link": link,
-        "crianca_como_adulto": False,
-        "faixa_tipica": (dados.get("price_insights") or {}).get("typical_price_range"),
-    }
+    faixa = (dados.get("price_insights") or {}).get("typical_price_range")
+    por_par = {}
+    for o in opcoes:
+        trechos = o.get("flights") or []
+        if not trechos:
+            continue
+        dep = (trechos[0].get("departure_airport") or {}).get("id") or origem.split(",")[0]
+        arr = (trechos[-1].get("arrival_airport") or {}).get("id") or destino.split(",")[0]
+        if dep not in origem.split(",") or arr not in destino.split(","):
+            continue
+        if (dep, arr) not in por_par or o["price"] < por_par[(dep, arr)]["price"]:
+            por_par[(dep, arr)] = o
+    if not por_par:
+        print(f"  ! {origem}->{destino} {ida}: nenhuma opção com preço")
+        return []
+    achados = []
+    for (dep, arr), o in por_par.items():
+        trechos = o["flights"]
+        cias = []
+        for t in trechos:
+            if t.get("airline") and t["airline"] not in cias:
+                cias.append(t["airline"])
+        minutos = o.get("total_duration") or 0
+        achados.append({
+            "origem": dep,
+            "destino": arr,
+            "ida": ida.isoformat(),
+            "volta": volta.isoformat(),
+            "dias": (volta - ida).days,
+            "preco": int(o["price"]),
+            "moeda": "BRL",
+            "preco_texto": f"R$ {o['price']}",
+            "companhia": ", ".join(cias) or "—",
+            "escalas": max(len(trechos) - 1, 0),
+            "duracao": f"{minutos // 60} hr {minutos % 60} min" if minutos else "",
+            "link": link,
+            "crianca_como_adulto": False,
+            "faixa_tipica": faixa,
+        })
+        print(f"    {dep}->{arr}: R$ {o['price']} ({', '.join(cias)})")
+    return achados
 
 
 def buscar(origem, destino, ida, volta):
@@ -500,7 +516,7 @@ def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
     moeda = melhor["moeda"]
     e = html.escape
 
-    linhas = ["✈️ <b>Radar de passagens · Geórgia</b>", ""]
+    linhas = ["✈️ <b>Radar de passagens · Tbilisi e Istambul</b>", ""]
     linhas.append("🔔 <i>" + e(" · ".join(motivos)) + "</i>")
     linhas += [
         "",
@@ -532,6 +548,21 @@ def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
         tendencia.append(f"🏷 Menor preço já visto: {fmt_preco(min(minimo, melhor['preco']), moeda)}")
     if tendencia:
         linhas += [""] + tendencia
+
+    por_cidade = {}
+    for r in resultados:
+        cidade = CIDADES.get(r["destino"], r["destino"])
+        if cidade not in por_cidade:
+            por_cidade[cidade] = r
+    if len(por_cidade) > 1:
+        linhas += ["", "<b>Melhor por destino</b>"]
+        for cidade, r in por_cidade.items():
+            linhas.append(
+                f"📌 {e(cidade)}: <b>{fmt_preco(r['preco'], r['moeda'])}</b> "
+                f"(≈ {fmt_preco(round(r['preco'] / (ADULTOS + CRIANCAS)), r['moeda'])}/pessoa) · "
+                f"{r['origem']}→{r['destino']} · {fmt_data(r['ida'])}–{fmt_data(r['volta'])} · "
+                f"{e(r['companhia'] or '—')}"
+            )
 
     if len(resultados) > 1:
         linhas += ["", "<b>Outras boas opções</b>"]
@@ -714,41 +745,34 @@ def main():
         time.sleep(0 if SERPAPI_KEY else PAUSA_ENTRE_BUSCAS)
         return achado
 
+    origens_api, destinos_api = ",".join(ORIGENS), ",".join(DESTINOS)
     if modo == "api" and MODO_TESTE:
         # teste: amostra espalhada pelo período, estadia de 17 dias
-        print(f"SerpApi (teste): origens {ORIGENS}")
+        print(f"SerpApi (teste): origens {ORIGENS}, destinos {DESTINOS}")
         for ida in datas_de_ida(3):
-            for origem in ORIGENS:
-                consultar(origem, DESTINOS[0], ida, ida + timedelta(days=17))
+            consultar(origens_api, destinos_api, ida, ida + timedelta(days=17))
     elif modo == "api":
-        # Plano grátis do SerpApi: poucas buscas por dia. Reconfere os 2 melhores já achados
-        # e testa as próximas combinações de um rodízio que percorre todo o período.
-        grade = [
-            (origem, DESTINOS[0], ida, ida + timedelta(days=estadia))
-            for ida in datas_de_ida(1)
-            for estadia in ESTADIAS_SERPAPI
-            for origem in ORIGENS
-        ]
+        # Plano grátis do SerpApi: poucas buscas por dia. Cada busca cobre todas as origens e
+        # destinos de uma vez. Reconfere as 2 melhores datas já achadas e segue um rodízio de datas.
+        grade = [(ida, ida + timedelta(days=e)) for ida in datas_de_ida(1) for e in ESTADIAS_SERPAPI]
         pos = historico.get("rodizio", 0) % len(grade)
-        melhores = []
-        if historico["execucoes"]:
-            todos = {}
-            for e in historico["execucoes"][-30:]:
-                for r in e.get("top5", []):
-                    chave = (r["origem"], r["destino"], r["ida"], r["volta"])
-                    todos[chave] = min(todos.get(chave, 10**9), r.get("preco_google", r["preco"]))
-            for (o, d, i, v), _ in sorted(todos.items(), key=lambda x: x[1])[:2]:
-                melhores.append((o, d, date.fromisoformat(i), date.fromisoformat(v)))
-        print(f"SerpApi: reconferindo {len(melhores)} melhores + rodízio a partir da posição {pos}/{len(grade)}")
-        MAX = BUSCAS_SERPAPI
-        for c in melhores:
-            if cont["buscas"] < MAX:
-                consultar(*c)
-        while cont["buscas"] < MAX and pos < len(grade) * 2:
-            consultar(*grade[pos % len(grade)])
+        todos = {}
+        for e in historico["execucoes"][-30:]:
+            for r in e.get("top5", []):
+                chave = (r["ida"], r["volta"])
+                todos[chave] = min(todos.get(chave, 10**9), r.get("preco_google", r["preco"]))
+        melhores = [
+            (date.fromisoformat(i), date.fromisoformat(v))
+            for (i, v), _ in sorted(todos.items(), key=lambda x: x[1])[:2]
+        ]
+        print(f"SerpApi: reconferindo {len(melhores)} melhores datas + rodízio a partir de {pos}/{len(grade)}")
+        for ida, volta in melhores:
+            consultar(origens_api, destinos_api, ida, volta)
+        inicio = pos
+        while cont["buscas"] < BUSCAS_SERPAPI and pos - inicio < len(grade):
+            ida, volta = grade[pos % len(grade)]
+            consultar(origens_api, destinos_api, ida, volta)
             pos += 1
-            if pos - historico.get("rodizio", 0) >= len(grade):
-                break
         historico["rodizio"] = pos % len(grade)
     elif modo == "rapido":
         print(f"Reconferindo {len(candidatos)} melhores combinações da última varredura")
@@ -788,7 +812,12 @@ def main():
             for destino in DESTINOS[1:]:
                 consultar(r["origem"], destino, date.fromisoformat(r["ida"]), date.fromisoformat(r["volta"]))
 
-    resultados = [r for r in cache.values() if r]
+    resultados = []
+    for v in cache.values():
+        if isinstance(v, list):
+            resultados += v
+        elif v:
+            resultados.append(v)
     print(f"Consultas feitas: {cont['buscas']} · com resultado: {len(resultados)}")
 
     if not resultados:
@@ -832,7 +861,10 @@ def main():
                 "data": datetime.now(timezone.utc).isoformat(timespec="minutes"),
                 "modo": modo,
                 "melhor": melhor,
-                "top5": resultados[:5],
+                "top5": resultados[:5] + [
+                    r for r in resultados[5:]
+                    if r["destino"] not in {x["destino"] for x in resultados[:5]}
+                ][:2],
             }
         )
         historico["execucoes"] = historico["execucoes"][-300:]
