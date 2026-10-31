@@ -504,7 +504,8 @@ def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
     linhas.append("🔔 <i>" + e(" · ".join(motivos)) + "</i>")
     linhas += [
         "",
-        f"🏆 <b>{fmt_preco(melhor['preco'], moeda)}</b>",
+        f"🏆 <b>{fmt_preco(melhor['preco'], moeda)}</b> para os {ADULTOS + CRIANCAS}",
+        f"👤 ≈ {fmt_preco(round(melhor['preco'] / (ADULTOS + CRIANCAS)), moeda)} por passageiro",
         f"📍 {e(nome_aeroporto(melhor['origem']))} → {e(nome_aeroporto(melhor['destino']))}",
         f"📅 {fmt_data(melhor['ida'])} → {fmt_data(melhor['volta'])} · {melhor['dias']} dias",
         f"🛫 {e(melhor['companhia'] or '—')}",
@@ -536,7 +537,8 @@ def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
         linhas += ["", "<b>Outras boas opções</b>"]
         for i, r in enumerate(resultados[1:5], 1):
             linhas.append(
-                f"{MEDALHAS[i]} <b>{fmt_preco(r['preco'], r['moeda'])}</b>{' ✚' if r.get('ajuste') else ''} · "
+                f"{MEDALHAS[i]} <b>{fmt_preco(r['preco'], r['moeda'])}</b>{' ✚' if r.get('ajuste') else ''} "
+                f"(≈ {fmt_preco(round(r['preco'] / (ADULTOS + CRIANCAS)), r['moeda'])}/pessoa) · "
                 f"{r['origem']}→{r['destino']} · {fmt_data(r['ida'])}–{fmt_data(r['volta'])} · "
                 f"{fmt_escalas(r['escalas'], curto=True)} · {fmt_duracao(r['duracao'])}"
             )
@@ -552,7 +554,10 @@ def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
         linhas.append("👶 Preço calculado com 3 adultos; a criança de 6 anos costuma pagar um pouco menos")
     if any(r.get("ajuste") for r in resultados[:5]):
         linhas.append("✚ inclui o deslocamento CNF↔GRU (ida e volta, toda a família)")
-    linhas.append("<i>Valores ida e volta, como exibidos no Google Flights. Reconfirme antes de comprar.</i>")
+    linhas.append(
+        f"👤 Valor por passageiro = total ÷ {ADULTOS + CRIANCAS} (média; a passagem da criança costuma ser um pouco mais barata)"
+    )
+    linhas.append("<i>Valores ida e volta para toda a família, como exibidos no Google Flights. Reconfirme antes de comprar.</i>")
     return "\n".join(linhas)
 
 
