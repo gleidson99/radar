@@ -627,7 +627,38 @@ def montar_botoes(resultados):
     return {"inline_keyboard": botoes}
 
 
+def enviar_whatsapp(mensagem_html, botoes=None):
+    """Envia a mesma mensagem para o seu WhatsApp pelo CallMeBot (grátis, só para o próprio número)."""
+    telefone = os.getenv("WHATSAPP_PHONE", "").strip()
+    chave = os.getenv("CALLMEBOT_APIKEY", "").strip()
+    if not telefone or not chave:
+        return
+    texto = mensagem_html
+    texto = re.sub(r"</?b>", "*", texto)
+    texto = re.sub(r"</?i>", "_", texto)
+    texto = re.sub(r"<[^>]+>", "", texto)
+    texto = html.unescape(texto)
+    if botoes:  # o WhatsApp não tem botões: põe o link do Google Flights no fim
+        for linha in botoes.get("inline_keyboard", []):
+            for b in linha:
+                if b.get("url"):
+                    texto += f"\n🔗 {b.get('text', 'Link')}: {b['url']}"
+    url = "https://api.callmebot.com/whatsapp.php?" + urllib.parse.urlencode(
+        {"phone": telefone, "text": texto, "apikey": chave}
+    )
+    try:
+        with urllib.request.urlopen(url, timeout=60) as resp:
+            corpo = resp.read().decode("utf-8", "ignore")
+        if "error" in corpo.lower() and "queued" not in corpo.lower():
+            print(f"WhatsApp (CallMeBot) respondeu: {re.sub('<[^>]+>', ' ', corpo)[:300]}")
+        else:
+            print("Mensagem enviada ao WhatsApp.")
+    except Exception as erro:
+        print(f"Falha ao enviar ao WhatsApp: {erro}")
+
+
 def enviar_telegram(mensagem, botoes=None):
+    enviar_whatsapp(mensagem, botoes)
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
