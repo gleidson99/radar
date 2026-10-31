@@ -1,0 +1,151 @@
+{
+  "execucoes": [
+    {
+      "data": "2026-10-31T12:11+00:00",
+      "modo": "api",
+      "melhor": {
+        "origem": "GRU",
+        "destino": "TBS",
+        "ida": "2027-01-08",
+        "volta": "2027-01-28",
+        "dias": 20,
+        "preco": 30639,
+        "moeda": "BRL",
+        "preco_texto": "R$ 29139",
+        "companhia": "Lufthansa",
+        "escalas": 1,
+        "duracao": "23 hr 55 min",
+        "link": "https://www.google.com/travel/flights?hl=pt&gl=br&curr=BRL&tfs=CBwQAhogEgoyMDI3LTAxLTA4KAJqBwgBEgNHUlVyBwgBEgNUQlMaIBIKMjAyNy0wMS0yOCgCagcIARIDVEJTcgcIARIDR1JVQAFAAUACSAFwAZgBAQ&tfu=EgIIAQ",
+        "crianca_como_adulto": false,
+        "faixa_tipica": [
+          22000,
+          35500
+        ],
+        "preco_original": 29139,
+        "moeda_original": "BRL",
+        "cotacao": null,
+        "ajuste": 1500,
+        "preco_google": 29139
+      },
+      "top5": [
+        {
+          "origem": "GRU",
+          "destino": "TBS",
+          "ida": "2027-01-08",
+          "volta": "2027-01-28",
+          "dias": 20,
+          "preco": 30639,
+          "moeda": "BRL",
+          "preco_texto": "R$ 29139",
+          "companhia": "Lufthansa",
+          "escalas": 1,
+          "duracao": "23 hr 55 min",
+          "link": "https://www.google.com/travel/flights?hl=pt&gl=br&curr=BRL&tfs=CBwQAhogEgoyMDI3LTAxLTA4KAJqBwgBEgNHUlVyBwgBEgNUQlMaIBIKMjAyNy0wMS0yOCgCagcIARIDVEJTcgcIARIDR1JVQAFAAUACSAFwAZgBAQ&tfu=EgIIAQ",
+          "crianca_como_adulto": false,
+          "faixa_tipica": [
+            22000,
+            35500
+          ],
+          "preco_original": 29139,
+          "moeda_original": "BRL",
+          "cotacao": null,
+          "ajuste": 1500,
+          "preco_google": 29139
+        },
+        {
+          "origem": "GRU",
+          "destino": "TBS",
+          "ida": "2027-01-08",
+          "volta": "2027-01-25",
+          "dias": 17,
+          "preco": 32281,
+          "moeda": "BRL",
+          "preco_texto": "R$ 30781",
+          "companhia": "Lufthansa",
+          "escalas": 1,
+          "duracao": "23 hr 55 min",
+          "link": "https://www.google.com/travel/flights?hl=pt&gl=br&curr=BRL&tfs=CBwQAhogEgoyMDI3LTAxLTA4KAJqBwgBEgNHUlVyBwgBEgNUQlMaIBIKMjAyNy0wMS0yNSgCagcIARIDVEJTcgcIARIDR1JVQAFAAUACSAFwAZgBAQ&tfu=EgIIAQ",
+          "crianca_como_adulto": false,
+          "faixa_tipica": [
+            22000,
+            35500
+          ],
+          "preco_original": 30781,
+          "moeda_original": "BRL",
+          "cotacao": null,
+          "ajuste": 1500,
+          "preco_google": 30781
+        },
+        {
+          "origem": "GRU",
+          "destino": "TBS",
+          "ida": "2027-01-08",
+          "volta": "2027-01-23",
+          "dias": 15,
+          "preco": 32782,
+          "moeda": "BRL",
+          "preco_texto": "R$ 31282",
+          "companhia": "Lufthansa",
+          "escalas": 1,
+          "duracao": "23 hr 55 min",
+          "link": "https://www.google.com/travel/flights?hl=pt&gl=br&curr=BRL&tfs=CBwQAhogEgoyMDI3LTAxLTA4KAJqBwgBEgNHUlVyBwgBEgNUQlMaIBIKMjAyNy0wMS0yMygCagcIARIDVEJTcgcIARIDR1JVQAFAAUACSAFwAZgBAQ&tfu=EgIIAQ",
+          "crianca_como_adulto": false,
+          "faixa_tipica": [
+            22000,
+            34000
+          ],
+          "preco_original": 31282,
+          "moeda_original": "BRL",
+          "cotacao": null,
+          "ajuste": 1500,
+          "preco_google": 31282
+        },
+        {
+          "origem": "GRU",
+          "destino": "TBS",
+          "ida": "2027-01-09",
+          "volta": "2027-01-24",
+          "dias": 15,
+          "preco": 34888,
+          "moeda": "BRL",
+          "preco_texto": "R$ 33388",
+          "companhia": "Qatar Airways",
+          "escalas": 1,
+          "duracao": "40 hr 20 min",
+          "link": "https://www.google.com/travel/flights?hl=pt&gl=br&curr=BRL&tfs=CBwQAhogEgoyMDI3LTAxLTA5KAJqBwgBEgNHUlVyBwgBEgNUQlMaIBIKMjAyNy0wMS0yNCgCagcIARIDVEJTcgcIARIDR1JVQAFAAUACSAFwAZgBAQ&tfu=EgIIAQ",
+          "crianca_como_adulto": false,
+          "faixa_tipica": [
+            22000,
+            34000
+          ],
+          "preco_original": 33388,
+          "moeda_original": "BRL",
+          "cotacao": null,
+          "ajuste": 1500,
+          "preco_google": 33388
+        },
+        {
+          "origem": "CNF",
+          "destino": "TBS",
+          "ida": "2027-01-09",
+          "volta": "2027-01-24",
+          "dias": 15,
+          "preco": 34948,
+          "moeda": "BRL",
+          "preco_texto": "R$ 34948",
+          "companhia": "Gol, Air France, Georgian Airways",
+          "escalas": 2,
+          "duracao": "28 hr 40 min",
+          "link": "https://www.google.com/travel/flights?hl=pt&gl=br&curr=BRL&tfs=CBwQAhogEgoyMDI3LTAxLTA5KAJqBwgBEgNDTkZyBwgBEgNUQlMaIBIKMjAyNy0wMS0yNCgCagcIARIDVEJTcgcIARIDQ05GQAFAAUACSAFwAZgBAQ&tfu=EgIIAQ",
+          "crianca_como_adulto": false,
+          "faixa_tipica": null,
+          "preco_original": 34948,
+          "moeda_original": "BRL",
+          "cotacao": null,
+          "ajuste": 0
+        }
+      ]
+    }
+  ],
+  "rodizio": 8
+}
