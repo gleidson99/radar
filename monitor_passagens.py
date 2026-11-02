@@ -49,7 +49,9 @@ VER_JANELA = os.getenv("VER_JANELA") == "1"   # 1 = mostra a janela do Chrome (p
 MODO_TESTE = os.getenv("TESTE") == "1" or os.getenv("ORIGENS", "CNF").replace(" ", "").upper() != "CNF"          # 1 = não grava histórico (teste de instalação)
 MILHAS = Path(__file__).with_name("milhas.json")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY", "").strip()   # com chave: usa a API do SerpApi (funciona no GitHub)
-BUSCAS_SERPAPI = int(os.getenv("BUSCAS_SERPAPI", "2"))  # por execução (3 execuções/dia x 2 = ~186/mês; plano grátis = 250)
+EVENTO = os.getenv("GITHUB_EVENT_NAME", "")   # "schedule" = automático; "workflow_dispatch" = manual
+MANUAL = EVENTO == "workflow_dispatch"
+BUSCAS_SERPAPI = int(os.getenv("BUSCAS_SERPAPI") or ("6" if MANUAL else "2"))  # automático: 3x/dia x 2 = ~186/mês; plano grátis = 250
 ESTADIAS_SERPAPI = (19, 20, 21, 22, 23, 24)  # estadias testadas no rodízio do SerpApi
 VALIDADE_PRECO_DIAS = 20             # preço sem reconferir há mais que isso sai da lista
 
@@ -406,6 +408,16 @@ def buscar_serpapi(origem, destino, ida, volta):
     return achados
 
 
+def cota_serpapi():
+    """Quantas buscas ainda restam no mês (a consulta da conta não gasta busca)."""
+    try:
+        dados = _json_da_url("https://serpapi.com/account.json?api_key=" + urllib.parse.quote(SERPAPI_KEY))
+        return dados.get("total_searches_left"), dados.get("searches_per_month")
+    except Exception as erro:
+        print(f"(não foi possível ler a cota do SerpApi: {erro})")
+        return None, None
+
+
 def buscar(origem, destino, ida, volta):
     """Usa o SerpApi se houver chave; senão, o Google Flights pelo navegador local."""
     if SERPAPI_KEY:
@@ -512,13 +524,23 @@ def aplicar_custo_ate_gru(resultados):
 
 
 # ------------------------------ TELEGRAM -------------------------------
-def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
+def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None, info=None):
     melhor = resultados[0]
     moeda = melhor["moeda"]
     e = html.escape
+    info = info or {}
 
     linhas = ["✈️ <b>Radar de passagens · Tbilisi e Istambul</b>", ""]
     linhas.append("🔔 <i>" + e(" · ".join(motivos)) + "</i>")
+    if info.get("consultadas"):
+        linhas += ["", f"🔎 <b>Datas consultadas agora ({len(info['consultadas'])})</b>"]
+        for ida, volta, preco in info["consultadas"]:
+            valor = fmt_preco(preco) if preco else "sem preço"
+            linhas.append(f"• {fmt_data(ida.isoformat())} → {fmt_data(volta.isoformat())} "
+                          f"({(volta - ida).days} dias): {valor}")
+    if info.get("cobertura"):
+        feitas, total = info["cobertura"]
+        linhas.append(f"🗓 Combinações com preço conhecido: {feitas} de {total}")
     linhas += [
         "",
         f"🏆 <b>{fmt_preco(melhor['preco'], moeda)}</b> para os {ADULTOS + CRIANCAS}",
@@ -589,6 +611,8 @@ def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None):
     linhas.append(
         f"👤 Valor por passageiro = total ÷ {ADULTOS + CRIANCAS} (média; a passagem da criança costuma ser um pouco mais barata)"
     )
+    if info.get("cota") is not None:
+        linhas.append(f"🔋 Buscas restantes no SerpApi este mês: {info['cota']}")
     linhas.append("<i>Valores ida e volta para toda a família, como exibidos no Google Flights. Reconfirme antes de comprar.</i>")
     return "\n".join(linhas)
 
@@ -786,7 +810,14 @@ def main():
     elif modo == "api":
         # Plano grátis do SerpApi: poucas buscas por dia. Cada busca cobre todas as origens e
         # destinos de uma vez. Reconfere as 2 melhores datas já achadas e segue um rodízio de datas.
-        grade = [(ida, ida + timedelta(days=e)) for ida in datas_de_ida(1) for e in ESTADIAS_SERPAPI]
+        # ordem espalhada: primeiro todas as datas de ida com estadia de 21 dias, depois 19, 24...
+        # assim em poucos dias já há preço para o período inteiro (antes ia dia a dia)
+        ordem_estadias = sorted(ESTADIAS_SERPAPI, key=lambda e: [21, 19, 24, 23, 20, 22].index(e)
+                                if e in (21, 19, 24, 23, 20, 22) else 99)
+        grade = [(ida, ida + timedelta(days=e)) for e in ordem_estadias for ida in datas_de_ida(1)]
+        if historico.get("ordem_grade") != 2:   # mudou a ordem: recomeça o rodízio
+            historico["rodizio"] = 0
+            historico["ordem_grade"] = 2
         pos = historico.get("rodizio", 0) % len(grade)
         todos = {}
         for e in historico["execucoes"][-30:]:
@@ -798,11 +829,27 @@ def main():
             todos[chave] = min(todos.get(chave, 10**9), r.get("preco_google", r["preco"]))
         n_exec = historico.get("contador", 0)
         historico["contador"] = n_exec + 1
-        reconferir = 1 if n_exec % 3 == 0 else 0   # 1x por dia reconfere a melhor data; nas outras, só rodízio
+        hoje = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=-3))).date().isoformat()
+        # reconfere a melhor data 1x por dia (e sempre numa execução manual)
+        reconferir = 1 if (MANUAL or historico.get("ultima_reconferencia") != hoje) else 0
+        if reconferir:
+            historico["ultima_reconferencia"] = hoje
         melhores = [
             (date.fromisoformat(i), date.fromisoformat(v))
             for (i, v), _ in sorted(todos.items(), key=lambda x: x[1])[:reconferir]
         ]
+        # busca manual com data escolhida (campos "ida" e "dias" no Run workflow)
+        ida_escolhida = os.getenv("IDA_MANUAL", "").strip()
+        if MANUAL and ida_escolhida:
+            try:
+                ida_m = date.fromisoformat(ida_escolhida)
+                dias_txt = os.getenv("DIAS_MANUAL", "").strip()
+                estadias_m = [int(x) for x in re.split(r"[,; ]+", dias_txt) if x] or list(ESTADIAS_SERPAPI)
+                print(f"Busca manual: ida {ida_m}, estadias {estadias_m}")
+                for d in estadias_m:
+                    consultar(origens_api, destinos_api, ida_m, ida_m + timedelta(days=d))
+            except ValueError:
+                print(f"  ! Data inválida: {ida_escolhida!r} (use AAAA-MM-DD, ex. 2027-01-05)")
         print(f"SerpApi: reconferindo {len(melhores)} melhores datas + rodízio a partir de {pos}/{len(grade)}")
         for ida, volta in melhores:
             consultar(origens_api, destinos_api, ida, volta)
@@ -908,8 +955,9 @@ def main():
         motivos.append(f"Queda de {queda:.0f}% desde a última consulta")
     if modo == "completo" and not motivos:
         motivos.append("Resumo diário")
-    if modo == "api" and not motivos and historico.get("contador", 0) % 3 == 1:
-        motivos.append("Resumo diário")   # 1 resumo por dia; nas outras execuções só avisa se cair
+    if modo == "api" and not motivos:
+        # toda execução manda mensagem: automática = resumo; manual = resultado da sua busca
+        motivos.append("Busca manual" if MANUAL else "Atualização automática")
 
     if not MODO_TESTE:
         historico["execucoes"].append(
@@ -926,9 +974,20 @@ def main():
         historico["execucoes"] = historico["execucoes"][-300:]
         HISTORICO.write_text(json.dumps(historico, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    info = {}
+    if modo == "api":
+        consultadas = []
+        for (o, d, ida, volta), v in cache.items():
+            precos_v = [r["preco"] for r in (v if isinstance(v, list) else [v] if v else [])]
+            consultadas.append((ida, volta, min(precos_v) if precos_v else None))
+        info["consultadas"] = consultadas
+        total = len(ESTADIAS_SERPAPI) * len(list(datas_de_ida(1)))
+        info["cobertura"] = (len({(r["ida"], r["volta"]) for r in resultados}), total)
+        info["cota"] = cota_serpapi()[0]
+        print(f"Buscas restantes no SerpApi: {info['cota']}")
     if motivos:
         enviar_telegram(
-            montar_mensagem(resultados, motivos, ultimo, minimo, carregar_milhas()),
+            montar_mensagem(resultados, motivos, ultimo, minimo, carregar_milhas(), info),
             montar_botoes(resultados),
         )
     else:

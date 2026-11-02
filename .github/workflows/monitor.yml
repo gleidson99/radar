@@ -2,9 +2,22 @@ name: Monitor de passagens
 
 on:
   schedule:
-    - cron: "0 1,9,17 * * *"   # 3x por dia: 22:00, 06:00 e 14:00 (Brasília), 2 buscas cada
+    - cron: "17 1,9,17 * * *"  # 3x por dia: ~22:17, 06:17 e 14:17 (Brasília), 2 buscas cada.
+                               # O GitHub costuma atrasar estes horários (às vezes 1 a 3 horas).
   workflow_dispatch:         # permite rodar manualmente pelo botão "Run workflow"
     inputs:
+      buscas:
+        description: "Quantas buscas fazer (cada uma = 1 data de ida + 1 estadia; gasta da cota de 250/mês)"
+        default: "6"
+        required: false
+      ida:
+        description: "Opcional: data de ida específica (AAAA-MM-DD, ex. 2027-01-05). Vazio = rodízio de datas"
+        default: ""
+        required: false
+      dias:
+        description: "Opcional: estadias para essa data (ex. 21 ou 19,22,24). Vazio = 19 a 24"
+        default: ""
+        required: false
       origens:
         description: "Origens (CNF = monitor normal; outra opção, ex. GRU = teste que não grava histórico)"
         default: "CNF"
@@ -33,6 +46,9 @@ jobs:
         env:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
           ORIGENS: ${{ github.event.inputs.origens || 'CNF' }}
+          BUSCAS_SERPAPI: ${{ github.event.inputs.buscas }}
+          IDA_MANUAL: ${{ github.event.inputs.ida }}
+          DIAS_MANUAL: ${{ github.event.inputs.dias }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}

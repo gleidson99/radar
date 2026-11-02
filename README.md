@@ -7,10 +7,16 @@ O Google bloqueia acesso automatizado, então no GitHub o monitor usa o **SerpAp
 
 - Roda **3 vezes por dia** (06:00, 14:00 e 22:00, horário de Brasília), com **2 buscas** por execução (~186/mês).
 - Origem **Confins (CNF)**; destinos **Tbilisi (TBS)** e **Istambul (IST e SAW)**, todos na mesma busca.
-- Ida de **01 a 15/jan**, estadia de **19 a 24 dias** (testa todos: 19, 20, 21, 22, 23 e 24). O rodízio cobre as 90 combinações em ~18 dias e, 1x por dia, reconfere a data mais barata.
+- Ida de **01 a 15/jan**, estadia de **19 a 24 dias** (testa todos: 19, 20, 21, 22, 23 e 24). O rodízio passa primeiro por todas as datas de ida com 21 dias (≈ 2,5 dias para cobrir o período), depois 19, 24, 23, 20 e 22; 1x por dia reconfere a data mais barata.
 - Guarda o último preço de cada combinação (até 20 dias) e compara sempre com o melhor já conhecido.
-- Manda **1 resumo por dia** e avisa a qualquer hora se surgir novo menor preço ou queda de 5% ou mais.
-- Sobram ~60 buscas no mês para execuções manuais (cada uma gasta 2).
+- **Toda execução manda mensagem** no Telegram, com as datas consultadas, quantas das 90 combinações já têm preço e quantas buscas restam no mês.
+- O GitHub costuma atrasar os horários agendados (às vezes 1 a 3 horas); isso é normal.
+
+### Busca manual (Actions → Monitor de passagens → Run workflow)
+- **buscas**: quantas consultas fazer (padrão 6). Cada uma = 1 data de ida + 1 estadia.
+- **ida** (opcional): uma data específica, ex. `2027-01-05`.
+- **dias** (opcional): estadias para essa data, ex. `21` ou `19,22,24`. Vazio = 19 a 24.
+- Sem data, a busca manual continua o rodízio. Cuidado com a cota: o automático gasta ~186 das 250 buscas do mês.
 
 ### Configuração
 1. Crie uma conta grátis em serpapi.com e copie a sua **API Key** (menu "Api Key").
