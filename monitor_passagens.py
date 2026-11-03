@@ -26,7 +26,7 @@ except ImportError:
 # ---------------------------- CONFIGURAÇÃO ----------------------------
 ORIGENS = [o.strip().upper() for o in os.getenv("ORIGENS", "CNF").split(",") if o.strip()]
 DESTINOS = ["TBS", "IST", "SAW"]     # Tbilisi (Geórgia) e os 2 aeroportos de Istambul
-IDA_DE = date(2027, 1, 1)            # primeira data de ida a considerar
+IDA_DE = date(2026, 12, 30)          # primeira data de ida a considerar (inclui 30 e 31/12)
 IDA_ATE = date(2027, 1, 15)          # última data de ida (primeira quinzena de janeiro)
 ESTADIA_MIN = 19                     # dias fora, no mínimo
 ESTADIA_MAX = 24                     # dias fora, no máximo
@@ -56,6 +56,11 @@ ESTADIAS_SERPAPI = (19, 20, 21, 22, 23, 24)  # estadias testadas no rodízio do 
 PARADA_DIAS = 3                      # dias em Istambul na ida (busca de múltiplos destinos)
 PARADA_AEROPORTOS = "IST,SAW"        # aeroportos de Istambul aceitos na parada
 DESTINO_FINAL = "TBS"
+SAIDA_ISTAMBUL_FIXA = {date(2026, 12, 31): date(2027, 1, 5)}   # igual ao itinerário da Turkish
+DATAS_FIXAS = [                      # combinações acompanhadas de perto (ida, volta)
+    (date(2026, 12, 31), date(2027, 2, 2)),   # achada no site da Turkish: R$ 30.697 (FlexFly, 3 pax)
+    (date(2026, 12, 30), date(2027, 2, 2)),
+]
 ESTADIAS_PARADA = (21, 19, 24)       # duração total da viagem testada no rodízio da parada
 MULTI_AGORA = os.getenv("PARADA_AGORA", "").strip().lower() in ("1", "sim", "s", "true", "yes")
 VALIDADE_PRECO_DIAS = 20             # preço sem reconferir há mais que isso sai da lista
@@ -423,11 +428,11 @@ def cota_serpapi():
         return None, None
 
 
-def buscar_parada(ida, volta):
+def buscar_parada(ida, volta, saida_ist=None):
     """Múltiplos destinos: CNF -> Istambul (ida), Istambul -> Tbilisi (PARADA_DIAS depois de chegar),
     Tbilisi -> CNF (volta). Retorna o itinerário mais barato ou None."""
     origem = ORIGENS[0]
-    saida_ist = ida + timedelta(days=1 + PARADA_DIAS)   # voos do Brasil chegam a Istambul no dia seguinte
+    saida_ist = saida_ist or ida + timedelta(days=1 + PARADA_DIAS)   # voos do Brasil chegam a Istambul no dia seguinte
     trechos = [
         {"departure_id": origem, "arrival_id": PARADA_AEROPORTOS, "date": ida.isoformat()},
         {"departure_id": PARADA_AEROPORTOS, "arrival_id": DESTINO_FINAL, "date": saida_ist.isoformat()},
@@ -705,6 +710,11 @@ def secao_parada(info):
             linhas.append(f"⚖️ {fmt_preco(dif)} a mais que Tbilisi ida e volta ({fmt_preco(direto['preco'])})")
         else:
             linhas.append(f"⚖️ {fmt_preco(-dif)} a menos que Tbilisi ida e volta ({fmt_preco(direto['preco'])})")
+    paradas = info.get("paradas_todas", {})
+    for ida_f, volta_f in DATAS_FIXAS:
+        r = paradas.get(f"{ida_f.isoformat()}|{volta_f.isoformat()}")
+        if r and (r["ida"], r["volta"]) != (p["ida"], p["volta"]):
+            linhas.append(f"📌 {fmt_data(r['ida'])}–{fmt_data(r['volta'])}: {fmt_preco(r['preco'])}")
     nova = info.get("parada_nova")
     if nova and (nova["ida"], nova["volta"]) != (p["ida"], p["volta"]):
         linhas.append(f"🔎 Consulta de agora ({fmt_data(nova['ida'])}–{fmt_data(nova['volta'])}): {fmt_preco(nova['preco'])}")
@@ -911,10 +921,12 @@ def main():
         # assim em poucos dias já há preço para o período inteiro (antes ia dia a dia)
         ordem_estadias = sorted(ESTADIAS_SERPAPI, key=lambda e: [21, 19, 24, 23, 20, 22].index(e)
                                 if e in (21, 19, 24, 23, 20, 22) else 99)
-        grade = [(ida, ida + timedelta(days=e)) for e in ordem_estadias for ida in datas_de_ida(1)]
-        if historico.get("ordem_grade") != 2:   # mudou a ordem: recomeça o rodízio
+        grade = list(DATAS_FIXAS) + [
+            (ida, ida + timedelta(days=e)) for e in ordem_estadias for ida in datas_de_ida(1)
+        ]
+        if historico.get("ordem_grade") != 3:   # mudou a grade: recomeça o rodízio
             historico["rodizio"] = 0
-            historico["ordem_grade"] = 2
+            historico["ordem_grade"] = 3
         pos = historico.get("rodizio", 0) % len(grade)
         todos = {}
         for e in historico["execucoes"][-30:]:
@@ -963,7 +975,12 @@ def main():
             n = historico.get("parada_contador", 0)
             historico["parada_contador"] = n + 1
             ida_p = volta_p = None
-            if n % 2 == 0:
+            # ciclo de 4 dias: datas fixas (31/12 e 30/12), melhor data de Tbilisi, rodízio
+            if n % 4 == 0 and DATAS_FIXAS:
+                ida_p, volta_p = DATAS_FIXAS[0]
+            elif n % 4 == 2 and len(DATAS_FIXAS) > 1:
+                ida_p, volta_p = DATAS_FIXAS[1]
+            elif n % 4 == 1:
                 # dias pares: usa a data mais barata já vista para Tbilisi ida e volta
                 tbs = sorted(
                     (r for r in historico.get("precos", {}).values() if r["destino"] == DESTINO_FINAL),
@@ -983,7 +1000,7 @@ def main():
                     volta_p = ida_p + timedelta(days=d[0] if d else 21)
                 except ValueError:
                     pass
-            achado = buscar_parada(ida_p, volta_p)
+            achado = buscar_parada(ida_p, volta_p, SAIDA_ISTAMBUL_FIXA.get(ida_p))
             cont["buscas"] += 1
             if achado:
                 achado["visto"] = datetime.now(timezone.utc).isoformat(timespec="minutes")
@@ -1128,6 +1145,7 @@ def main():
         if paradas:
             info["parada"] = min(paradas.values(), key=lambda r: r["preco"])
             info["parada_nova"] = parada_nova
+            info["paradas_todas"] = paradas
             tbs = [r for r in resultados if r["destino"] == DESTINO_FINAL]
             info["tbs_direto"] = min(tbs, key=lambda r: r["preco"]) if tbs else None
         info["cota"] = cota_serpapi()[0]
