@@ -18,6 +18,10 @@ on:
         description: "Opcional: estadias para essa data (ex. 21 ou 19,22,24). Vazio = 19 a 24"
         default: ""
         required: false
+      parada:
+        description: "Buscar agora também a opção com 3 dias em Istambul? (sim/não; gasta 1 busca)"
+        default: "não"
+        required: false
       origens:
         description: "Origens (CNF = monitor normal; outra opção, ex. GRU = teste que não grava histórico)"
         default: "CNF"
@@ -49,6 +53,7 @@ jobs:
           BUSCAS_SERPAPI: ${{ github.event.inputs.buscas }}
           IDA_MANUAL: ${{ github.event.inputs.ida }}
           DIAS_MANUAL: ${{ github.event.inputs.dias }}
+          PARADA_AGORA: ${{ github.event.inputs.parada }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}

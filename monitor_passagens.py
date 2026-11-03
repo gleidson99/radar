@@ -53,6 +53,11 @@ EVENTO = os.getenv("GITHUB_EVENT_NAME", "")   # "schedule" = automático; "workf
 MANUAL = EVENTO == "workflow_dispatch"
 BUSCAS_SERPAPI = int(os.getenv("BUSCAS_SERPAPI") or ("6" if MANUAL else "2"))  # automático: 3x/dia x 2 = ~186/mês; plano grátis = 250
 ESTADIAS_SERPAPI = (19, 20, 21, 22, 23, 24)  # estadias testadas no rodízio do SerpApi
+PARADA_DIAS = 3                      # dias em Istambul na ida (busca de múltiplos destinos)
+PARADA_AEROPORTOS = "IST,SAW"        # aeroportos de Istambul aceitos na parada
+DESTINO_FINAL = "TBS"
+ESTADIAS_PARADA = (21, 19, 24)       # duração total da viagem testada no rodízio da parada
+MULTI_AGORA = os.getenv("PARADA_AGORA", "").strip().lower() in ("1", "sim", "s", "true", "yes")
 VALIDADE_PRECO_DIAS = 20             # preço sem reconferir há mais que isso sai da lista
 
 AEROPORTOS = {
@@ -418,6 +423,67 @@ def cota_serpapi():
         return None, None
 
 
+def buscar_parada(ida, volta):
+    """Múltiplos destinos: CNF -> Istambul (ida), Istambul -> Tbilisi (PARADA_DIAS depois de chegar),
+    Tbilisi -> CNF (volta). Retorna o itinerário mais barato ou None."""
+    origem = ORIGENS[0]
+    saida_ist = ida + timedelta(days=1 + PARADA_DIAS)   # voos do Brasil chegam a Istambul no dia seguinte
+    trechos = [
+        {"departure_id": origem, "arrival_id": PARADA_AEROPORTOS, "date": ida.isoformat()},
+        {"departure_id": PARADA_AEROPORTOS, "arrival_id": DESTINO_FINAL, "date": saida_ist.isoformat()},
+        {"departure_id": DESTINO_FINAL, "arrival_id": origem, "date": volta.isoformat()},
+    ]
+    params = {
+        "engine": "google_flights",
+        "type": "3",                      # múltiplos destinos
+        "multi_city_json": json.dumps(trechos),
+        "travel_class": "1",
+        "adults": ADULTOS,
+        "children": CRIANCAS,
+        "currency": "BRL",
+        "hl": "pt",
+        "gl": "br",
+        "api_key": SERPAPI_KEY,
+    }
+    url = "https://serpapi.com/search.json?" + urllib.parse.urlencode(params)
+    print(f"[parada] Buscando {origem}->Istambul {ida} · Istambul->TBS {saida_ist} · TBS->{origem} {volta}")
+    try:
+        with urllib.request.urlopen(url, timeout=90) as resp:
+            dados = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as erro:
+        print(f"  ! SerpApi (parada): HTTP {erro.code} {erro.read().decode('utf-8', 'replace')[:300]}")
+        return None
+    except Exception as erro:
+        print(f"  ! SerpApi (parada): {erro}")
+        return None
+    if dados.get("error"):
+        print(f"  ! SerpApi (parada): {dados['error']}")
+        return None
+    opcoes = [o for o in dados.get("best_flights", []) + dados.get("other_flights", []) if o.get("price")]
+    if not opcoes:
+        print("  ! (parada) nenhuma opção com preço")
+        return None
+    o = min(opcoes, key=lambda x: x["price"])
+    voos = o.get("flights") or []
+    cias = []
+    for t in voos:
+        if t.get("airline") and t["airline"] not in cias:
+            cias.append(t["airline"])
+    chegada = (voos[-1].get("arrival_airport") or {}).get("id") if voos else None
+    print(f"    parada: R$ {o['price']} (1º trecho: {', '.join(cias)}, chega em {chegada})")
+    return {
+        "ida": ida.isoformat(),
+        "saida_istambul": saida_ist.isoformat(),
+        "volta": volta.isoformat(),
+        "dias": (volta - ida).days,
+        "preco": int(o["price"]),
+        "companhia": ", ".join(cias) or "—",
+        "escalas": max(len(voos) - 1, 0),
+        "chegada_istambul": chegada,
+        "link": dados.get("search_metadata", {}).get("google_flights_url") or "",
+    }
+
+
 def buscar(origem, destino, ida, volta):
     """Usa o SerpApi se houver chave; senão, o Google Flights pelo navegador local."""
     if SERPAPI_KEY:
@@ -597,6 +663,7 @@ def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None, info=N
                 f"{fmt_escalas(r['escalas'], curto=True)} · {fmt_duracao(r['duracao'])}"
             )
 
+    linhas += secao_parada(info)
     linhas += secao_milhas(melhor, milhas_cfg or {})
 
     linhas.append("")
@@ -615,6 +682,35 @@ def montar_mensagem(resultados, motivos, ultimo, minimo, milhas_cfg=None, info=N
         linhas.append(f"🔋 Buscas restantes no SerpApi este mês: {info['cota']}")
     linhas.append("<i>Valores ida e volta para toda a família, como exibidos no Google Flights. Reconfirme antes de comprar.</i>")
     return "\n".join(linhas)
+
+
+def secao_parada(info):
+    """Bloco da mensagem com o melhor preço achado com parada em Istambul."""
+    p = info.get("parada")
+    if not p:
+        return []
+    pax = ADULTOS + CRIANCAS
+    linhas = [
+        "",
+        f"<b>🇹🇷 Com {PARADA_DIAS} dias em Istambul (bilhete único)</b>",
+        f"💰 <b>{fmt_preco(p['preco'])}</b> para os {pax} (≈ {fmt_preco(round(p['preco'] / pax))}/pessoa)",
+        f"📅 CNF→Istambul {fmt_data(p['ida'])} · Istambul→Tbilisi {fmt_data(p['saida_istambul'])} · "
+        f"Tbilisi→CNF {fmt_data(p['volta'])} ({p['dias']} dias)",
+        f"🛫 1º trecho: {html.escape(p['companhia'])} · {fmt_escalas(p['escalas'])}",
+    ]
+    direto = info.get("tbs_direto")
+    if direto:
+        dif = p["preco"] - direto["preco"]
+        if dif > 0:
+            linhas.append(f"⚖️ {fmt_preco(dif)} a mais que Tbilisi ida e volta ({fmt_preco(direto['preco'])})")
+        else:
+            linhas.append(f"⚖️ {fmt_preco(-dif)} a menos que Tbilisi ida e volta ({fmt_preco(direto['preco'])})")
+    nova = info.get("parada_nova")
+    if nova and (nova["ida"], nova["volta"]) != (p["ida"], p["volta"]):
+        linhas.append(f"🔎 Consulta de agora ({fmt_data(nova['ida'])}–{fmt_data(nova['volta'])}): {fmt_preco(nova['preco'])}")
+    if p.get("link"):
+        linhas.append(f'🔗 <a href="{html.escape(p["link"])}">Ver no Google Flights</a>')
+    return linhas
 
 
 def carregar_milhas():
@@ -778,6 +874,7 @@ def main():
     print(f"Modo: {modo}" + (" (TESTE: não grava histórico)" if MODO_TESTE else ""))
 
     cache = {}            # (origem, destino, ida, volta) -> resultado ou None
+    parada_nova = None
     cont = {"falhas": 0, "buscas": 0}
 
     def consultar(origem, destino, ida, volta):
@@ -859,6 +956,41 @@ def main():
             consultar(origens_api, destinos_api, ida, volta)
             pos += 1
         historico["rodizio"] = pos % len(grade)
+
+        # Busca com parada de PARADA_DIAS dias em Istambul: 1x por dia (ou quando pedida no Run workflow)
+        if not MODO_TESTE and (MULTI_AGORA or historico.get("ultima_parada") != hoje):
+            historico["ultima_parada"] = hoje
+            n = historico.get("parada_contador", 0)
+            historico["parada_contador"] = n + 1
+            ida_p = volta_p = None
+            if n % 2 == 0:
+                # dias pares: usa a data mais barata já vista para Tbilisi ida e volta
+                tbs = sorted(
+                    (r for r in historico.get("precos", {}).values() if r["destino"] == DESTINO_FINAL),
+                    key=lambda r: r["preco"],
+                )
+                if tbs:
+                    ida_p, volta_p = date.fromisoformat(tbs[0]["ida"]), date.fromisoformat(tbs[0]["volta"])
+            if ida_p is None:
+                grade_p = [(i, i + timedelta(days=d)) for d in ESTADIAS_PARADA for i in datas_de_ida(2)]
+                k = historico.get("rodizio_parada", 0) % len(grade_p)
+                ida_p, volta_p = grade_p[k]
+                historico["rodizio_parada"] = k + 1
+            if MULTI_AGORA and ida_escolhida:
+                try:
+                    ida_p = date.fromisoformat(ida_escolhida)
+                    d = [int(x) for x in re.split(r"[,; ]+", os.getenv("DIAS_MANUAL", "")) if x]
+                    volta_p = ida_p + timedelta(days=d[0] if d else 21)
+                except ValueError:
+                    pass
+            achado = buscar_parada(ida_p, volta_p)
+            cont["buscas"] += 1
+            if achado:
+                achado["visto"] = datetime.now(timezone.utc).isoformat(timespec="minutes")
+                paradas = historico.get("paradas", {})
+                paradas[f"{achado['ida']}|{achado['volta']}"] = achado
+                historico["paradas"] = paradas
+                parada_nova = achado
     elif modo == "rapido":
         print(f"Reconferindo {len(candidatos)} melhores combinações da última varredura")
         for c in candidatos:
@@ -905,11 +1037,12 @@ def main():
             resultados.append(v)
     print(f"Consultas feitas: {cont['buscas']} · com resultado: {len(resultados)}")
 
-    if not resultados:
+    if not resultados and not (modo == "api" and not MODO_TESTE and (historico.get("precos") or parada_nova)):
         print("Nenhum resultado obtido nesta execução.")
         registrar_falha("Nenhuma consulta retornou preços.")
         return
-    registrar_sucesso()
+    if resultados or parada_nova:
+        registrar_sucesso()
 
     converter_para_reais(resultados)
     aplicar_custo_ate_gru(resultados)
@@ -983,6 +1116,20 @@ def main():
         info["consultadas"] = consultadas
         total = len(ESTADIAS_SERPAPI) * len(list(datas_de_ida(1)))
         info["cobertura"] = (len({(r["ida"], r["volta"]) for r in resultados}), total)
+        limite_p = datetime.now(timezone.utc) - timedelta(days=VALIDADE_PRECO_DIAS)
+        paradas = {
+            k: v for k, v in historico.get("paradas", {}).items()
+            if IDA_DE.isoformat() <= v["ida"] <= IDA_ATE.isoformat()
+            and datetime.fromisoformat(v.get("visto", "2000-01-01T00:00+00:00")) >= limite_p
+        }
+        historico["paradas"] = paradas
+        if not MODO_TESTE:
+            HISTORICO.write_text(json.dumps(historico, ensure_ascii=False, indent=2), encoding="utf-8")
+        if paradas:
+            info["parada"] = min(paradas.values(), key=lambda r: r["preco"])
+            info["parada_nova"] = parada_nova
+            tbs = [r for r in resultados if r["destino"] == DESTINO_FINAL]
+            info["tbs_direto"] = min(tbs, key=lambda r: r["preco"]) if tbs else None
         info["cota"] = cota_serpapi()[0]
         print(f"Buscas restantes no SerpApi: {info['cota']}")
     if motivos:
