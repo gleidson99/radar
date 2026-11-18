@@ -428,7 +428,7 @@ def cota_serpapi():
         return None, None
 
 
-def buscar_parada(ida, volta, saida_ist=None):
+def buscar_parada(ida, volta, saida_ist=None, cias=None):
     """Múltiplos destinos: CNF -> Istambul (ida), Istambul -> Tbilisi (PARADA_DIAS depois de chegar),
     Tbilisi -> CNF (volta). Retorna o itinerário mais barato ou None."""
     origem = ORIGENS[0]
@@ -442,6 +442,7 @@ def buscar_parada(ida, volta, saida_ist=None):
         "engine": "google_flights",
         "type": "3",                      # múltiplos destinos
         "multi_city_json": json.dumps(trechos),
+        **({"include_airlines": cias} if cias else {}),
         "travel_class": "1",
         "adults": ADULTOS,
         "children": CRIANCAS,
@@ -1162,6 +1163,79 @@ def main():
         )
 
 
+def busca_turkish(n_pedido):
+    """Busca concentrada: Turkish Airlines (com trechos Azul/LATAM até GRU), parada de N dias em
+    Istambul, saídas em janeiro e viagem de 20 a 26 dias. Grava em historico["turkish"] e avisa."""
+    parada = int(os.getenv("TK_PARADA", "4"))
+    est_min, est_max = 20, 26
+    mes_ini, mes_fim = date(2027, 1, 1), date(2027, 1, 31)
+    cias = os.getenv("TK_CIAS", "TK,AD,LA")
+    historico = carregar_historico()
+    restantes, por_mes = cota_serpapi()
+    reserva = int(os.getenv("TK_RESERVA", "20"))  # deixa buscas para o monitor normal
+    n = n_pedido if restantes is None else max(0, min(n_pedido, restantes - reserva))
+    print(f"Turkish: pedido {n_pedido}, restantes {restantes}, reserva {reserva} -> {n} buscas")
+    feitos = {}
+
+    def tenta(ida, dias):
+        if len(feitos) >= n or (ida, dias) in feitos or not (mes_ini <= ida <= mes_fim):
+            return None
+        volta = ida + timedelta(days=dias)
+        r = buscar_parada(ida, volta, ida + timedelta(days=1 + parada), cias)
+        feitos[(ida, dias)] = r
+        return r
+
+    # fase 1: janeiro inteiro, de 3 em 3 dias, viagem de 23 dias
+    passo = 3 if n >= 16 else 4 if n >= 12 else 6
+    d = mes_ini
+    while d <= mes_fim and len(feitos) < n * 0.6:
+        tenta(d, 23)
+        d += timedelta(days=passo)
+    # fase 2: ao redor das 2 melhores saídas, outras durações e dias vizinhos
+    def ranking():
+        return sorted((k for k, v in feitos.items() if v), key=lambda k: feitos[k]["preco"])
+    for ida, _ in ranking()[:2]:
+        for dias in (20, 26):
+            tenta(ida, dias)
+    for ida, dias in ranking()[:2]:
+        for delta in (-1, 1, -2, 2):
+            tenta(ida + timedelta(days=delta), dias)
+    melhor_ida, melhor_dias = (ranking() or [(None, None)])[0]
+    if melhor_ida:
+        for dias in range(est_min, est_max + 1):
+            tenta(melhor_ida, dias)
+
+    res = sorted((v for v in feitos.values() if v), key=lambda r: r["preco"])
+    historico["turkish"] = {
+        "data": datetime.now(timezone.utc).isoformat(timespec="minutes"),
+        "parada_dias": parada,
+        "cias": cias,
+        "buscas": len(feitos),
+        "cota_antes": restantes,
+        "cota_mes": por_mes,
+        "resultados": res,
+        "sem_preco": [f"{k[0]}+{k[1]}" for k, v in feitos.items() if not v],
+    }
+    HISTORICO.write_text(json.dumps(historico, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    pax = ADULTOS + CRIANCAS
+    linhas = [f"✈️ <b>Turkish · CNF → Tbilisi com {parada} dias em Istambul</b>",
+              f"<i>Saídas em janeiro, viagem de {est_min} a {est_max} dias · {len(feitos)} buscas</i>", ""]
+    if not res:
+        linhas.append("Nenhum preço encontrado.")
+    for i, r in enumerate(res[:8]):
+        marca = MEDALHAS[i] if i < len(MEDALHAS) else "•"
+        linhas.append(
+            f"{marca} <b>{fmt_preco(r['preco'])}</b> (≈ {fmt_preco(round(r['preco'] / pax))}/pessoa) · "
+            f"{fmt_data(r['ida'])} → Istambul · {fmt_data(r['saida_istambul'])} → Tbilisi · "
+            f"volta {fmt_data(r['volta'])} ({r['dias']} dias) · {html.escape(r['companhia'])}"
+        )
+    if res and res[0].get("link"):
+        linhas += ["", f'🔗 <a href="{html.escape(res[0]["link"])}">Ver o mais barato no Google Flights</a>']
+    linhas += ["", "<i>Total para os 3, tarifa mais barata (sem escolher assento). Confirme no site da Turkish.</i>"]
+    enviar_telegram("\n".join(linhas))
+
+
 def executar_com_trava():
     """Evita duas execuções ao mesmo tempo (ex.: varredura longa + próxima hora)."""
     carregar_segredos()
@@ -1175,7 +1249,11 @@ def executar_com_trava():
     except Exception:
         pass
     try:
-        main()
+        n_tk = int(os.getenv("TURKISH_BUSCAS") or "0")
+        if n_tk > 0 and SERPAPI_KEY:
+            busca_turkish(n_tk)
+        else:
+            main()
     finally:
         try:
             trava.unlink()

@@ -22,6 +22,10 @@ on:
         description: "Buscar agora também a opção com 3 dias em Istambul? (sim/não; gasta 1 busca)"
         default: "não"
         required: false
+      turkish:
+        description: "Busca especial Turkish (CNF→Tbilisi, 4 dias em Istambul, jan, 20-26 dias): nº de buscas (0 = não)"
+        default: "0"
+        required: false
       origens:
         description: "Origens (CNF = monitor normal; outra opção, ex. GRU = teste que não grava histórico)"
         default: "CNF"
@@ -54,6 +58,7 @@ jobs:
           IDA_MANUAL: ${{ github.event.inputs.ida }}
           DIAS_MANUAL: ${{ github.event.inputs.dias }}
           PARADA_AGORA: ${{ github.event.inputs.parada }}
+          TURKISH_BUSCAS: ${{ github.event.inputs.turkish }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}
